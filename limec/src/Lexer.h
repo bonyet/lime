@@ -49,6 +49,7 @@ struct Lexer
 	Lexer(const char* source);
 	
 	Token Next();
+	Token Retreat();
 
 	Token PeekNext(int amount); // Returns the next token without advancing
 	Token PeekPrevious(int depth); // Returns the previous token without reatreating

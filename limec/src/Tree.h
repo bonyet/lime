@@ -166,25 +166,78 @@ struct Binary : public Expression
 
 	String ToString(int& indent) override
 	{
-		indent += 2;
-
 		String result;
 
-		if (indent > 2)
-			result.Format("| [%s]:\n%*c", GetStringType(), indent, ' ');
-		else
-			result.Format("[%s]:\n%*c", GetStringType(), indent, ' ');
+		result.Format("%*c| [%s]:\n%*c", indent, ' ', GetStringType(), indent + 2, ' ');
 
 		result += left->ToString(indent);
-		result += String::FromFormat("%*c", indent, ' ');
+		result += String::FromFormat("%*c", indent + 2, ' ');
 		result += right->ToString(indent);
-
-		indent -= 2;
 
 		return result;
 	}
 
 	llvm::Value* Generate() override;
+};
+
+struct Call : public Expression
+{
+	String fnName;
+	std::vector<std::unique_ptr<Expression>> params;
+
+	String ToString(int& indent) override
+	{
+		String base = String::FromFormat("| [call %s]:\n", fnName.chars());
+
+		for (int i = 0; i < params.size(); ++i)
+		{
+			base += params[i]->ToString(indent);
+		}
+
+		return base;
+	}
+};
+
+// Yes, function declarations don't technically express anything, but this just inherits from Expression anyways
+struct Function : public Expression
+{
+	struct Parameter
+	{
+		String name;
+		// TODO: Type type;
+	};
+
+	String name;
+	std::vector<Parameter> args;
+	std::list<std::unique_ptr<Statement>> body;
+
+	String ToString(int& indent) override
+	{
+		String base = String::FromFormat("| [%s(", name.chars());
+
+		for (int i = 0; i < args.size(); ++i)
+		{
+			base += args[i].name;
+
+			if (args.size() > 1 && i != args.size() - 1)
+			{
+				base += ", ";
+			}
+		}
+
+		base += ")]:\n";
+
+		indent += 2;
+
+		for (auto& statement : body)
+		{
+			base += statement->ToString(indent);
+		}
+
+		indent -= 2;
+
+		return base;
+	}
 };
 
 struct VariableDeclaration : public Statement

@@ -1,3 +1,11 @@
+sum :: (int a, int b, int c, int z)
 {
-	1 + 2;
+	1 + 2 / 10;
+}
+
+nothing :: () {}
+
+main :: ()
+{
+	nothing(1 + 2, 5 * 10, sum(1, 2));
 }

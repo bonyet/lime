@@ -339,6 +339,13 @@ Token Lexer::Next()
 	return *token;
 }
 
+Token Lexer::Retreat()
+{
+	lexer->currentIndex--;
+
+	return PeekNext(0);
+}
+
 Token Lexer::PeekNext(int amount)
 {
 	if (amount > TOKEN_PEEK_COUNT)

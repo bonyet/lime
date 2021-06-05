@@ -61,8 +61,8 @@ Value* Binary::Generate()
 
 Generator::Generator()
 {
-	context = std::make_unique<LLVMContext>();
-	module = std::make_unique<Module>("Module", *context);
+	context = std::make_unique<LLVMContext>(); 
+	module = std::make_unique<Module>("Code Module", *context);
 	builder = std::make_unique<IRBuilder<>>(*context);
 }
 

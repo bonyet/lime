@@ -93,6 +93,7 @@ static unique_ptr<Statement>  ParseStatement();
 static unique_ptr<Expression> ParseUnaryExpression();
 static unique_ptr<Statement>  ParseCompoundStatement();
 static unique_ptr<Expression> ParsePrimaryExpression();
+static unique_ptr<Expression> ParseIdentifierExpression();
 
 static unique_ptr<Expression> ParseExpression(int priority) 
 {
@@ -192,6 +193,11 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 	
 	switch (token.type)
 	{
+		case TokenType::ID:
+		{
+			parser->current = parser->lexer->Retreat();
+			return ParseIdentifierExpression();
+		}
 		case TokenType::Number:
 		{
 			auto primary = make_unique<PrimaryNumber>();
@@ -239,7 +245,7 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 		throw LimeError("Expected an expression after variable declaration");
 	}
 	default:
-		throw LimeError("Invalid token for primary expression");
+		throw LimeError("Invalid token for primary expression: %.*s", token.length, token.start);
 	}
 }
 
@@ -249,6 +255,95 @@ static unique_ptr<Statement> ParseExpressionStatement()
 	Expect(TokenType::Semicolon, "Expected ';' after expression");
 
 	return statement;
+}
+
+static unique_ptr<Function> ParseFunctionDeclaration()
+{
+	Token* current = &parser->current;
+	auto function = make_unique<Function>();
+
+	// Find name
+	function->name.Copy(current->start, current->length);
+
+	Advance(); // To ::
+	Advance(); // Through ::
+	Expect(TokenType::LeftParen, "Expected '(' after '::'");
+
+	// Parse parameters
+	while (current->type != TokenType::RightParen)
+	{
+		Advance(); // To name
+		Function::Parameter arg;
+		arg.name.Copy(current->start, current->length);
+		function->args.push_back(std::move(arg));
+
+		Advance();
+		if (current->type != TokenType::RightParen)
+			Expect(TokenType::Comma, "Expected ',' after function parameter");
+	}
+
+	Expect(TokenType::RightParen, "Expected ')'");
+	Expect(TokenType::LeftCurlyBracket, "Expected '{' after function declaration");
+
+	// Parse body
+	while (current->type != TokenType::RightCurlyBracket)
+	{
+		function->body.push_back(ParseStatement());
+	}
+
+	Expect(TokenType::RightCurlyBracket, "Expected '}' after function body");
+	
+	return function;
+}
+
+static unique_ptr<Call> ParseFunctionCall()
+{
+	// Whether or not this function call is being used as an argument in another function call (nested?)
+	bool isArgument = parser->state == Parser::State::FunctionCallArgs;
+
+	Token* current = &parser->current;
+
+	auto call = make_unique<Call>();
+	call->fnName.Copy(current->start, current->length);
+
+	Advance(); // Through name
+	Advance(); // Through (
+
+	SetState(Parser::State::FunctionCallArgs);
+	// Parse arguments
+	while (current->type != TokenType::RightParen)
+	{
+		call->params.push_back(ParseExpression(-1));
+
+		if (current->type != TokenType::RightParen)
+			Expect(TokenType::Comma, "Expected ',' after argument");
+	}
+	Advance(); // Through )
+
+	// If we are not an argument, reset state and advance through semicolon
+	if (!isArgument)
+	{
+		ResetState();
+		Advance();
+	}
+
+	return call;
+}
+
+static unique_ptr<Expression> ParseIdentifierExpression()
+{
+	Token* current = &parser->current; // At :: if valid decl
+
+	Token next = parser->lexer->PeekNext(1);
+	switch (next.type)
+	{
+	case TokenType::DoubleColon:
+		return ParseFunctionDeclaration();
+	case TokenType::LeftParen:
+		return ParseFunctionCall();
+	}
+
+	throw LimeError("Invalid identifier expression '%.*s'", next.length, next.start);
 }
 
 static unique_ptr<Statement> ParseVariableDeclarationStatement()
@@ -294,6 +389,8 @@ static unique_ptr<Statement> ParseStatement()
 		return ParseCompoundStatement();
 	case TokenType::Int:
 		return ParseVariableDeclarationStatement();
+	case TokenType::ID:
+		return ParseIdentifierExpression();
 	}
 
 	return ParseExpressionStatement();

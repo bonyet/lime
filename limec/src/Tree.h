@@ -2,22 +2,23 @@
 
 #include "Lexer.h"
 #include "String.h"
-#include <list>
+#include "Type.h"
 
 #include <llvm\IR\Value.h>
+#include <list>
 
 struct Statement
 {
 	virtual ~Statement() {}
 	virtual String ToString(int& indent) { return "| [Statement]\n"; }
 
-	virtual llvm::Value* Generate() { return nullptr; }
+	virtual void* Generate() { return nullptr; }
 };
 
 // Block of statements
 struct Compound : public Statement
 {
-	std::list<std::unique_ptr<Statement>> statements;
+	std::vector<std::unique_ptr<Statement>> statements;
 
 	String ToString(int& indent) override
 	{
@@ -34,6 +35,7 @@ struct Compound : public Statement
 
 struct Expression : public Statement
 {
+	Type type = (Type)0;
 };
 
 struct Primary : public Expression
@@ -48,11 +50,6 @@ struct Primary : public Expression
 	}
 };
 
-enum class NumberType
-{
-	Int = 1, Float, Boolean,
-};
-
 struct PrimaryNumber : public Primary
 {
 	union
@@ -61,17 +58,16 @@ struct PrimaryNumber : public Primary
 		bool b32;
 		float f32;
 	} value;
-	NumberType type = (NumberType)0;
 
 	String ToString(int& indent) override
 	{
 		switch (type)
 		{
-		case NumberType::Int:
+		case Type::Int:
 			return String::FromFormat("| [Primary]: %i\n", value.i32);
-		case NumberType::Float:
+		case Type::Float:
 			return String::FromFormat("| [Primary]: %f\n", value.f32);
-		case NumberType::Boolean:
+		case Type::Boolean:
 			const char* strValue = value.b32 ? "true" : "false";
 			return String::FromFormat("| [Primary]: %s\n", strValue);
 		}
@@ -79,7 +75,7 @@ struct PrimaryNumber : public Primary
 		return {};
 	}
 
-	llvm::Value* Generate() override;
+	void* Generate() override;
 };
 
 struct PrimaryString : public Primary
@@ -177,49 +173,70 @@ struct Binary : public Expression
 		return result;
 	}
 
-	llvm::Value* Generate() override;
+	void* Generate() override;
 };
 
 struct Call : public Expression
 {
 	String fnName;
-	std::vector<std::unique_ptr<Expression>> params;
+	std::vector<std::unique_ptr<Expression>> args;
 
 	String ToString(int& indent) override
 	{
 		String base = String::FromFormat("| [call %s]:\n", fnName.chars());
 
-		for (int i = 0; i < params.size(); ++i)
+		for (int i = 0; i < args.size(); ++i)
 		{
-			base += params[i]->ToString(indent);
+			base += args[i]->ToString(indent);
 		}
 
 		return base;
 	}
+
+	void* Generate() override;
+};
+
+struct Return : public Expression
+{
+	std::unique_ptr<Expression> expression;
+
+	String ToString(int& indent) override
+	{
+		String base = "| [return]: \n";
+
+		indent += 2;
+		base += expression->ToString(indent);
+		indent -= 2;
+
+		return base;
+	}
+
+	void* Generate() override { return expression->Generate(); }
 };
 
 // Yes, function declarations don't technically express anything, but this just inherits from Expression anyways
-struct Function : public Expression
+struct FunctionDefinition : public Expression
 {
 	struct Parameter
 	{
 		String name;
-		// TODO: Type type;
+		Type type = (Type)0;
 	};
 
 	String name;
-	std::vector<Parameter> args;
-	std::list<std::unique_ptr<Statement>> body;
+	std::vector<Parameter> params;
+	int indexOfReturnInBody = -1;
+	std::vector<std::unique_ptr<Statement>> body;
 
 	String ToString(int& indent) override
 	{
 		String base = String::FromFormat("| [%s(", name.chars());
 
-		for (int i = 0; i < args.size(); ++i)
+		for (int i = 0; i < params.size(); ++i)
 		{
-			base += args[i].name;
+			base += params[i].name;
 
-			if (args.size() > 1 && i != args.size() - 1)
+			if (params.size() > 1 && i != params.size() - 1)
 			{
 				base += ", ";
 			}
@@ -234,13 +251,17 @@ struct Function : public Expression
 			base += statement->ToString(indent);
 		}
 
+		base += body[indexOfReturnInBody]->ToString(indent);
+
 		indent -= 2;
 
 		return base;
 	}
+
+	void* Generate() override;
 };
 
-struct VariableDeclaration : public Statement
+struct VariableDefinition : public Statement
 {
 	String ToString(int& indent) override
 	{
@@ -257,5 +278,5 @@ struct Variable : public Expression
 		return String::FromFormat("| [IDRead]: %s\n", idName.chars());
 	}
 
-	llvm::Value* Generate() override;
+	void* Generate() override;
 };

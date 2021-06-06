@@ -187,19 +187,33 @@ static unique_ptr<Expression> ParseUnaryExpression()
 	}
 }
 
+static unique_ptr<Return> ParseReturnStatement()
+{
+	auto returnExpr = make_unique<Return>();
+	returnExpr->expression = ParseExpression(-1);
+
+	return returnExpr;
+}
+
 static unique_ptr<Expression> ParsePrimaryExpression()
 {
-	Token token = Consume();
+	Token token = parser->current;
 	
 	switch (token.type)
 	{
+		case TokenType::Return:
+		{
+			Advance();
+			return ParseReturnStatement();
+		}
 		case TokenType::ID:
 		{
-			parser->current = parser->lexer->Retreat();
 			return ParseIdentifierExpression();
 		}
 		case TokenType::Number:
 		{
+			Advance();
+
 			auto primary = make_unique<PrimaryNumber>();
 			primary->token = token;
 
@@ -207,19 +221,22 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 			if (strnchr(token.start, '.', token.length))
 			{
 				primary->value.f32 = strtof(token.start, nullptr);
-				primary->type = NumberType::Float;
+				primary->type = Type::Float;
 			}
 			else
 			{
 				primary->value.i32 = (int)strtol(token.start, nullptr, 0);
-				primary->type = NumberType::Int;
+				primary->type = Type::Int;
 			}
 			
 			return primary;
 		}
 		case TokenType::String:
 		{
+			Advance();
+
 			auto primary = make_unique<PrimaryString>();
+			primary->type = Type::String;
 			primary->token = token;
 
 			primary->string.Copy(token.start, token.length);
@@ -257,10 +274,10 @@ static unique_ptr<Statement> ParseExpressionStatement()
 	return statement;
 }
 
-static unique_ptr<Function> ParseFunctionDeclaration()
+static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 {
 	Token* current = &parser->current;
-	auto function = make_unique<Function>();
+	auto function = make_unique<FunctionDefinition>();
 
 	// Find name
 	function->name.Copy(current->start, current->length);
@@ -272,10 +289,12 @@ static unique_ptr<Function> ParseFunctionDeclaration()
 	// Parse parameters
 	while (current->type != TokenType::RightParen)
 	{
-		Advance(); // To name
-		Function::Parameter arg;
-		arg.name.Copy(current->start, current->length);
-		function->args.push_back(std::move(arg));
+		FunctionDefinition::Parameter param;
+		param.type = TypeFromString(current->start);
+
+		Advance(); // Through type
+		param.name.Copy(current->start, current->length);
+		function->params.push_back(std::move(param));
 
 		Advance();
 		if (current->type != TokenType::RightParen)
@@ -283,16 +302,40 @@ static unique_ptr<Function> ParseFunctionDeclaration()
 	}
 
 	Expect(TokenType::RightParen, "Expected ')'");
+
+	// Handle nondefault return types
+	if (current->type == TokenType::RightArrow)
+	{
+		Advance(); // Through ->
+
+		function->type = TypeFromString(parser->current.start);
+		
+		Advance(); // Through type
+	}
+
 	Expect(TokenType::LeftCurlyBracket, "Expected '{' after function declaration");
 
 	// Parse body
+	int statementIndex = 0;
 	while (current->type != TokenType::RightCurlyBracket)
 	{
-		function->body.push_back(ParseStatement());
+		auto statement = ParseStatement();
+
+		if (dynamic_cast<Return*>(statement.get()))
+			function->indexOfReturnInBody = statementIndex;
+
+		function->body.push_back(std::move(statement));
+
+		statementIndex++;
 	}
 
 	Expect(TokenType::RightCurlyBracket, "Expected '}' after function body");
 	
+	if (function->indexOfReturnInBody == -1)
+	{
+		throw LimeError("Expected a return statement within '%s'", function->name.chars());
+	}
+
 	return function;
 }
 
@@ -313,7 +356,7 @@ static unique_ptr<Call> ParseFunctionCall()
 	// Parse arguments
 	while (current->type != TokenType::RightParen)
 	{
-		call->params.push_back(ParseExpression(-1));
+		call->args.push_back(ParseExpression(-1));
 
 		if (current->type != TokenType::RightParen)
 			Expect(TokenType::Comma, "Expected ',' after argument");
@@ -354,7 +397,7 @@ static unique_ptr<Statement> ParseVariableDeclarationStatement()
 
 	Advance(); // Through name
 
-	auto variableDecl = make_unique<VariableDeclaration>();
+	auto variableDecl = make_unique<VariableDefinition>();
 	
 	// No initializer
 	if (parser->current.type == TokenType::Semicolon)

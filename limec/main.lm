@@ -1,11 +1,4 @@
-sum :: (int a, int b, int c, int z)
+sum :: (float c) -> float
 {
-	1 + 2 / 10;
-}
-
-nothing :: () {}
-
-main :: ()
-{
-	nothing(1 + 2, 5 * 10, sum(1, 2));
+	return (5.5 + 16.1);
 }

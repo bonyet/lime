@@ -26,6 +26,7 @@ enum class TokenType : uint16_t
 	True, False,
 	// Primitive type keywords, TODO: add more!
 	Int,
+	Return,
 
 	// Misc
 	Ampersand, Pipe, Percent, At, Hashtag, ID, 

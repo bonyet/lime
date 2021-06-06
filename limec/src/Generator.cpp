@@ -1,69 +1,238 @@
 #include "Generator.h"
 
 #include "Error.h"
+#include "Type.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/Verifier.h>
 
-using namespace llvm;
+static std::unique_ptr<llvm::LLVMContext> context;
+static std::unique_ptr<llvm::IRBuilder<>> builder;
+static std::unique_ptr<llvm::Module> module;
+static std::map<std::string, llvm::Value*> namedValues;
 
-static std::unique_ptr<LLVMContext> context;
-static std::unique_ptr<IRBuilder<>> builder;
-static std::unique_ptr<Module> module;
-static std::map<String, Value*> namedValues;
-
-Value* PrimaryNumber::Generate()
+void* PrimaryNumber::Generate()
 {
-	return ConstantFP::get(*context, APFloat(value.f32));
+	switch (type)
+	{
+	case Type::Int:
+		return llvm::ConstantInt::get(*context, llvm::APInt(32, value.i32));
+	case Type::Float:
+		return llvm::ConstantFP::get(*context, llvm::APFloat(value.f32));
+	case Type::Boolean:
+		return llvm::ConstantInt::getBool(*context, value.b32);
+	}
 }
 
-Value* Variable::Generate()
+void* Variable::Generate()
 {
-	Value* value = namedValues[idName];
+	llvm::Value* value = namedValues[idName.chars()];
 	if (!value)
-		throw LimeError("Unknown variable name");
+		throw CompileError("Unknown variable name");
 
 	return value;
 }
 
-Value* Binary::Generate()
+void* Binary::Generate()
 {
-	Value* lhs = left->Generate();
-	Value* rhs = right->Generate();
+	llvm::Value* lhs = (llvm::Value*)left->Generate();
+	llvm::Value* rhs = (llvm::Value*)right->Generate();
 
 	if (!lhs || !rhs)
 		return nullptr;
 
+	if (right->type != left->type)
+		throw CompileError("Both operands of a binary operation must be of the same type");
+
+	Type opType = left->type;
+	
+	// please find me a better way of doing this
 	switch (type)
 	{
 	case BinaryType::Add:
-		return builder->CreateFAdd(lhs, rhs, "addtmp");
-	case BinaryType::Subtract:
-		return builder->CreateFSub(lhs, rhs, "subtmp");
-	case BinaryType::Multiply:
-		return builder->CreateFMul(lhs, rhs, "multmp");
-	case BinaryType::Divide:
-		return builder->CreateFDiv(lhs, rhs, "divtmp");
-	case BinaryType::Equal:
-		return builder->CreateFCmpUEQ(lhs, rhs, "cmptmp");
-	case BinaryType::Less:
-		return builder->CreateFCmpULT(lhs, rhs, "cmptmp");
-	case BinaryType::LessEqual:
-		return builder->CreateFCmpULE(lhs, rhs, "cmptmp");
-	case BinaryType::Greater:
-		return builder->CreateFCmpUGT(lhs, rhs, "cmptmp");
-	case BinaryType::GreaterEqual:
-		return builder->CreateFCmpUGE(lhs, rhs, "cmptmp");
-	default:
-		throw LimeError("Invalid binary operator");
+	{
+		if (opType == Type::Int)
+			return builder->CreateAdd(lhs, rhs, "addtmp");
+		if (opType == Type::Float)
+			return builder->CreateFAdd(lhs, rhs, "addtmp");
 	}
+	case BinaryType::Subtract:
+	{
+		if (opType == Type::Int)
+			return builder->CreateSub(lhs, rhs, "subtmp");
+		if (opType == Type::Float)
+			return builder->CreateFSub(lhs, rhs, "subtmp");
+	}
+	case BinaryType::Multiply:
+	{
+		if (opType == Type::Int)
+			return builder->CreateMul(lhs, rhs, "multmp");
+		if (opType == Type::Float)
+			return builder->CreateFMul(lhs, rhs, "multmp");
+	}
+	case BinaryType::Divide:
+	{
+		if (opType == Type::Int)
+			throw CompileError("Integer division not supported");
+		if (opType == Type::Float)
+			return builder->CreateFDiv(lhs, rhs, "divtmp");
+	}
+	case BinaryType::Equal:
+	{
+		if (opType == Type::Int)
+			return builder->CreateICmpEQ(lhs, rhs, "cmptmp");
+		if (opType == Type::Float)
+			return builder->CreateFCmpUEQ(lhs, rhs, "cmptmp");
+	}
+	case BinaryType::Less:
+	{
+		if (opType == Type::Int)
+			return builder->CreateICmpULT(lhs, rhs, "cmptmp");
+		if (opType == Type::Float)
+			return builder->CreateFCmpULT(lhs, rhs, "cmptmp");
+	}
+	case BinaryType::LessEqual:
+	{
+		if (opType == Type::Int)
+			return builder->CreateICmpULE(lhs, rhs, "cmptmp");
+		if (opType == Type::Float)
+			return builder->CreateFCmpULE(lhs, rhs, "cmptmp");
+	}
+	case BinaryType::Greater:
+	{
+		if (opType == Type::Int)
+			return builder->CreateICmpUGT(lhs, rhs, "cmptmp");
+		if (opType == Type::Float)
+			return builder->CreateFCmpUGT(lhs, rhs, "cmptmp");
+	}
+	case BinaryType::GreaterEqual:
+	{
+		if (opType == Type::Int)
+			return builder->CreateICmpUGE(lhs, rhs, "cmptmp");
+		if (opType == Type::Float)
+			return builder->CreateFCmpUGE(lhs, rhs, "cmptmp");
+	}
+	default:
+		throw CompileError("Invalid binary operator");
+	}
+}
+
+void* Call::Generate()
+{
+	using namespace llvm;
+
+	// Look up function name
+	Function* func = module->getFunction(fnName.chars());
+	if (!func)
+		throw CompileError("Unknown function referenced");
+
+	// Handle arg mismatch
+	if (func->arg_size() != args.size())
+		throw CompileError("Incorrect number of arguments passed to '%s'", fnName.chars());
+
+	// Generate arguments
+	std::vector<Value*> argValues;
+	for (auto& expression : args)
+	{
+		Value* generated = (Value*)expression->Generate();
+		argValues.push_back(generated);
+		if (!generated)
+		{
+			throw CompileError("Failed to generate function argument");
+		}
+	}
+
+	return (Value*)builder->CreateCall(func, argValues, "calltmp");
+}
+
+static llvm::Type* GetLLVMType(Type type)
+{
+	switch (type)
+	{
+	case Type::Int:
+		return llvm::Type::getInt32Ty(*context);
+	case Type::Float:
+		return llvm::Type::getFloatTy(*context);
+	}
+
+	throw CompileError("Unknown type");
+	return nullptr;
+}
+
+void* FunctionDefinition::Generate()
+{
+	// TODO: correct types
+
+	llvm::Function* function = module->getFunction(name.chars());
+	// Create function if it doesn't exist
+	if (!function)
+	{
+		std::vector<llvm::Type*> paramTypes(params.size());
+
+		// Fill paramTypes with proper types
+		int index = 0;
+		for (auto& param : params)
+			paramTypes[index++] = GetLLVMType(param.type);
+		
+		index = 0; // Reuse later
+
+		llvm::Type* returnType = GetLLVMType(type);
+
+		if (!returnType)
+			throw CompileError("Invalid return type for '%s'", name.chars());
+
+		llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
+		function = llvm::Function::Create(functionType, llvm::Function::ExternalLinkage, name.chars(), *module);
+
+		// Set names for function args
+		for (auto& arg : function->args())
+		{
+			arg.setName(params[index++].name.chars());
+		}
+	}
+	if (!function->empty())
+	{
+		throw CompileError("Function cannot be redefined");
+	}
+
+	// Setup function body
+
+	// Create block to start insertion into
+	llvm::BasicBlock* block = llvm::BasicBlock::Create(*context, "entry", function);
+	builder->SetInsertPoint(block);
+
+	// Record args into values map
+	namedValues.clear();
+	for (auto& arg : function->args())
+	{
+		namedValues[arg.getName().str()] = &arg;
+	}
+
+	// Generate body
+	for (auto& statement : body)
+	{
+		statement->Generate();
+	}
+
+	// Return value
+	llvm::Value* returnValue = (llvm::Value*)body[indexOfReturnInBody]->Generate();
+	builder->CreateRet(returnValue);
+
+	if (verifyFunction(*function, &llvm::errs()))
+	{
+		function->eraseFromParent();
+		throw CompileError("Invalid function");
+	}
+
+	return function;
 }
 
 Generator::Generator()
 {
-	context = std::make_unique<LLVMContext>(); 
-	module = std::make_unique<Module>("Code Module", *context);
-	builder = std::make_unique<IRBuilder<>>(*context);
+	context = std::make_unique<llvm::LLVMContext>();
+	module = std::make_unique<llvm::Module>("Code Module", *context);
+	builder = std::make_unique<llvm::IRBuilder<>>(*context);
 }
 
 Generator::~Generator()
@@ -72,10 +241,17 @@ Generator::~Generator()
 
 void Generator::Generate(std::unique_ptr<struct Compound> compound)
 {
-	for (auto& child : compound->statements)
+	try
 	{
-		Value* value = child->Generate();
+		for (auto& child : compound->statements)
+		{
+			child->Generate();
+		}
+	}
+	catch (CompileError& err)
+	{
+		fprintf(stderr, "CodeGenError: %s\n\n", err.message.chars());
 	}
 
-	module->print(errs(), nullptr);
+	module->print(llvm::errs(), nullptr);
 }

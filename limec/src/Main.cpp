@@ -50,6 +50,7 @@ int main(int argc, const char* argv[])
 
 	ParseResult parseResult = parser.Parse(&lexer);
 	printf(parseResult.Succeeded ? "Parsing succeeded\n" : "Parsing failed\n");
+	printf("\n");
 
 	if (parseResult.Succeeded)
 	{

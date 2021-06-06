@@ -281,13 +281,23 @@ static void ProcessToken(Token* token)
 
 	// Keywords
 	case 'i':
-	{
-		if (CheckKeyword("int", 3))
 		{
-			*token = MakeToken(TokenType::Int, 3);
-			return;
+			if (CheckKeyword("int", 3))
+			{
+				*token = MakeToken(TokenType::Int, 3);
+				return;
+			}
+			break;
 		}
-	}
+	case 'r':
+		{
+			if (CheckKeyword("return", 6))
+			{
+				*token = MakeToken(TokenType::Return, 6);
+				return;
+			}
+			break;
+		}
 	}
 
 	// Handle end token
@@ -330,6 +340,7 @@ Token Lexer::Next()
 	start = current;
 
 	Token* token = &lexer->tokens[lexer->currentIndex].token;
+
 	if (!lexer->tokens[lexer->currentIndex].valid) {
 		lexer->tokens[lexer->currentIndex].valid = true;
 
@@ -364,7 +375,7 @@ Token Lexer::PeekNext(int amount)
 			ProcessToken(&lexer->tokens[index].token);
 		}
 	}
-	
+
 	return lexer->tokens[index].token;
 }
 

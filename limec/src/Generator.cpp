@@ -12,6 +12,25 @@ static std::unique_ptr<llvm::IRBuilder<>> builder;
 static std::unique_ptr<llvm::Module> module;
 static std::map<std::string, llvm::Value*> namedValues;
 
+// Utils
+static llvm::Type* GetLLVMType(Type type)
+{
+	switch (type)
+	{
+	case Type::Int:
+		return llvm::Type::getInt32Ty(*context);
+	case Type::Float:
+		return llvm::Type::getFloatTy(*context);
+	case Type::Boolean:
+		return llvm::Type::getInt1Ty(*context); // A bool is just small int !
+	case Type::Void:
+		return llvm::Type::getVoidTy(*context);
+	}
+
+	throw CompileError("Unknown type");
+	return nullptr;
+}
+
 void* PrimaryValue::Generate()
 {
 	switch (type)
@@ -25,13 +44,27 @@ void* PrimaryValue::Generate()
 	}
 }
 
+void* VariableDefinition::Generate()
+{
+	using namespace llvm;
+
+	// Allocate on the stack
+	AllocaInst* allocaInst = builder->CreateAlloca(GetLLVMType(type), nullptr, name.chars());
+	StoreInst* storeInst = builder->CreateStore((Value*)initializer->Generate(), allocaInst, false);
+	namedValues.emplace(name.chars(), allocaInst);
+
+	return allocaInst;
+}
+
 void* Variable::Generate()
 {
-	llvm::Value* value = namedValues[idName.chars()];
+	using namespace llvm;
+
+	Value* value = namedValues[name.chars()];
 	if (!value)
 		throw CompileError("Unknown variable name");
 
-	return value;
+	return builder->CreateLoad(namedValues[name.chars()], name.chars());
 }
 
 void* Binary::Generate()
@@ -40,7 +73,7 @@ void* Binary::Generate()
 	llvm::Value* rhs = (llvm::Value*)right->Generate();
 
 	if (!lhs || !rhs)
-		return nullptr;
+		throw CompileError("Invalid binary operator"); // What happon
 
 	if (right->type != left->type)
 		throw CompileError("Both operands of a binary operation must be of the same type");
@@ -153,24 +186,6 @@ void* Call::Generate()
 	}
 
 	return (Value*)builder->CreateCall(func, argValues, "calltmp");
-}
-
-static llvm::Type* GetLLVMType(Type type)
-{
-	switch (type)
-	{
-	case Type::Int:
-		return llvm::Type::getInt32Ty(*context);
-	case Type::Float:
-		return llvm::Type::getFloatTy(*context);
-	case Type::Boolean:
-		return llvm::Type::getInt8Ty(*context); // A bool is just small int !
-	case Type::Void:
-		return llvm::Type::getVoidTy(*context);
-	}
-
-	throw CompileError("Unknown type");
-	return nullptr;
 }
 
 void* FunctionDefinition::Generate()

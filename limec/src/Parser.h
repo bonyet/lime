@@ -21,6 +21,8 @@ struct Parser
 
 	ParseResult Parse(Lexer* lexer);
 
+	uint32_t scopeDepth = 0;
+
 	State state = State::Default;
 	Token current;
 	Lexer* lexer = nullptr;

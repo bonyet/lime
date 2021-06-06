@@ -1,4 +1,10 @@
+sum :: (int a) -> int
+{
+	return 1 + 2;
+}
+
 main :: ()
 {
-	bool b = false;
+	int num = 5;
+	int a = num;
 }

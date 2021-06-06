@@ -62,18 +62,22 @@ struct PrimaryValue : public Primary
 
 	String ToString(int& indent) override
 	{
+		String base = String::FromFormat("%*c| [Primary]: ", indent, ' ');
+
 		switch (type)
 		{
 		case Type::Int:
-			return String::FromFormat("| [Primary]: %i\n", value.i32);
+			base += String::FromFormat("%i\n", value.i32);
+			break;
 		case Type::Float:
-			return String::FromFormat("| [Primary]: %f\n", value.f32);
+			base += String::FromFormat("%f\n", value.f32);
+			break;
 		case Type::Boolean:
-			const char* strValue = value.b32 ? "true" : "false";
-			return String::FromFormat("| [Primary]: %s\n", strValue);
+			base += String::FromFormat("%s\n", value.b32 ? "true" : "false");
+			break;
 		}
 		
-		return {};
+		return base;
 	}
 
 	void* Generate() override;
@@ -177,6 +181,29 @@ struct Binary : public Expression
 	void* Generate() override;
 };
 
+struct If : public Statement
+{
+	std::unique_ptr<Expression> expression;
+	std::vector<std::unique_ptr<Statement>> body;
+
+	String ToString(int& indent) override
+	{
+		String base = String::FromFormat("%*c| [If]:\n", indent, ' ');
+
+		indent += 2;
+		base += expression->ToString(indent);
+
+		for (auto& statement : body)
+		{
+			base += statement->ToString(indent);
+		}
+
+		indent -= 2;
+
+		return base;
+	}
+};
+
 struct Call : public Expression
 {
 	String fnName;
@@ -203,7 +230,7 @@ struct Return : public Expression
 
 	String ToString(int& indent) override
 	{
-		String base = "| [return]: \n";
+		String base = "| [return]:\n";
 
 		indent += 2;
 		base += expression->ToString(indent);
@@ -247,9 +274,11 @@ struct FunctionDefinition : public Expression
 
 		indent += 2;
 
+		int index = 0;
 		for (auto& statement : body)
 		{
-			base += statement->ToString(indent);
+			if (index++ != indexOfReturnInBody)
+				base += statement->ToString(indent);
 		}
 
 		if (indexOfReturnInBody != -1)
@@ -265,19 +294,26 @@ struct FunctionDefinition : public Expression
 
 struct VariableDefinition : public Statement
 {
+	std::unique_ptr<Expression> initializer;
+	int scope = -1;
+	String name;
+	Type type;
+
 	String ToString(int& indent) override
 	{
-		return String::FromFormat("| [VariableDecl]\n");
+		return String::FromFormat("| [VariableDef]: %s\n", name.chars());
 	}
+
+	void* Generate() override;
 };
 
 struct Variable : public Expression
 {
-	String idName;
+	String name;
 
 	String ToString(int& indent) override
 	{
-		return String::FromFormat("| [IDRead]: %s\n", idName.chars());
+		return String::FromFormat("| [IDRead]: %s\n", name.chars());
 	}
 
 	void* Generate() override;

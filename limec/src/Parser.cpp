@@ -25,6 +25,19 @@ static Token Consume()
 	return token;
 }
 
+static void DeepenScope()
+{
+	parser->scopeDepth++;
+}
+static void IncreaseScope()
+{
+#ifdef _DEBUG
+	if (parser->scopeDepth <= 0)
+		throw LimeError("Cannot decrease a scope depth of 0");
+#endif
+	parser->scopeDepth--;
+}
+
 template<typename... Args>
 static void Expect(TokenType type, const char* errorMessageFmt, Args&&... args)
 {
@@ -93,6 +106,7 @@ static unique_ptr<Statement>  ParseStatement();
 static unique_ptr<Expression> ParseUnaryExpression();
 static unique_ptr<Statement>  ParseCompoundStatement();
 static unique_ptr<Expression> ParsePrimaryExpression();
+static unique_ptr<Expression> ParseVariableExpression();
 static unique_ptr<Expression> ParseIdentifierExpression();
 
 static unique_ptr<Expression> ParseExpression(int priority) 
@@ -264,28 +278,28 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 		}
 	}
 
-	switch (parser->state)
-	{
-	case Parser::State::VariableInitializer:
-	{
-		// TODO: fix this shit? why is this here i dont remember
+	//switch (parser->state)
+	//{
+	//case Parser::State::VariableInitializer:
+	//{
+	//	// TODO: fix this shit? why is this here i dont remember
 
-		// Identifiers can be used as primary expressions such as:
-		// int b = 1;
-		// int a = b; <- b is a variable
-		// So we have to handle the special case here
-		if (token.type == TokenType::ID)
-		{
-			auto expression = make_unique<Variable>();
-			expression->idName.Copy(token.start, token.length);
-			return expression;
-		}
+	//	// Identifiers can be used as primary expressions such as:
+	//	// int b = 1;
+	//	// int a = b; <- b is a variable
+	//	// So we have to handle the special case here
+	//	if (token.type == TokenType::ID)
+	//	{
+	//		auto expression = make_unique<Variable>();
+	//		expression->name.Copy(token.start, token.length);
+	//		return expression;
+	//	}
 
-		throw LimeError("Expected an expression after variable declaration");
-	}
-	default:
-		throw LimeError("Invalid token for primary expression: %.*s", token.length, token.start);
-	}
+	//	throw LimeError("Expected an expression after variable declaration");
+	//}
+	//default:
+	//}
+	throw LimeError("Invalid token for primary expression: %.*s", token.length, token.start);
 }
 
 static unique_ptr<Statement> ParseExpressionStatement()
@@ -338,6 +352,8 @@ static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 
 	Expect(TokenType::LeftCurlyBracket, "Expected '{' after function declaration");
 
+	DeepenScope();
+
 	// Parse body
 	int statementIndex = 0;
 	while (current->type != TokenType::RightCurlyBracket)
@@ -354,6 +370,8 @@ static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 
 	Expect(TokenType::RightCurlyBracket, "Expected '}' after function body");
 	
+	IncreaseScope();
+
 	if (function->indexOfReturnInBody == -1 && function->type != Type::Void)
 	{
 		throw LimeError("Expected a return statement within '%s'", function->name.chars());
@@ -365,7 +383,8 @@ static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 static unique_ptr<Call> ParseFunctionCall()
 {
 	// Whether or not this function call is being used as an argument in another function call (nested?)
-	bool isArgument = parser->state == Parser::State::FunctionCallArgs;
+	bool isArgument    = parser->state == Parser::State::FunctionCallArgs;
+	bool isInitializer = parser->state == Parser::State::VariableInitializer;
 
 	Token* current = &parser->current;
 
@@ -387,7 +406,8 @@ static unique_ptr<Call> ParseFunctionCall()
 	Advance(); // Through )
 
 	// If we are not an argument, reset state and advance through semicolon
-	if (!isArgument)
+	// Also make sure we are not initializing a variable so that we don't advance through the semicolon we need
+	if (!isArgument && !isInitializer)
 	{
 		ResetState();
 		Advance();
@@ -396,9 +416,21 @@ static unique_ptr<Call> ParseFunctionCall()
 	return call;
 }
 
+static unique_ptr<Expression> ParseVariableExpression()
+{
+	Token* current = &parser->current;
+
+	auto variable = make_unique<Variable>();
+	variable->name.Copy(current->start, current->length);
+
+	Advance(); // Through identifier
+
+	return variable;
+}
+
 static unique_ptr<Expression> ParseIdentifierExpression()
 {
-	Token* current = &parser->current; // At :: if valid decl
+	Token* current = &parser->current; // At identifier
 
 	Token* next = &parser->lexer->nextToken;
 	switch (next->type)
@@ -407,6 +439,8 @@ static unique_ptr<Expression> ParseIdentifierExpression()
 		return ParseFunctionDeclaration();
 	case TokenType::LeftParen:
 		return ParseFunctionCall();
+	default:
+		return ParseVariableExpression();
 	}
 
 	throw LimeError("Invalid identifier expression '%.*s'", next->length, next->start);
@@ -421,7 +455,10 @@ static unique_ptr<Statement> ParseVariableDeclarationStatement()
 	Advance(); // Through name
 
 	auto variableDecl = make_unique<VariableDefinition>();
-	
+	variableDecl->scope = parser->scopeDepth;
+	variableDecl->name.Copy(nameToken.start, nameToken.length);
+	variableDecl->type = TypeFromString(typeToken.start);
+
 	// No initializer
 	if (parser->current.type == TokenType::Semicolon)
 	{
@@ -435,7 +472,7 @@ static unique_ptr<Statement> ParseVariableDeclarationStatement()
 		Advance(); // Through =
 		
 		// Parse initializer
-		auto initializerExpression = ParseExpression(-1);
+		variableDecl->initializer = ParseExpression(-1);
 
 		Expect(TokenType::Semicolon, "Expected ';' after expression");
 
@@ -443,6 +480,30 @@ static unique_ptr<Statement> ParseVariableDeclarationStatement()
 	}
 
 	return variableDecl;
+}
+
+static unique_ptr<Statement> ParseIfStatement()
+{
+	Token* current = &parser->current;
+
+	auto statement = make_unique<If>();
+
+	Advance(); // Through 'if'
+	
+	// Parse the expression
+	statement->expression = ParseExpression(-1);
+
+	Expect(TokenType::LeftCurlyBracket, "Expected '{' after expression");
+
+	// Parse body
+	while (current->type != TokenType::RightCurlyBracket)
+	{
+		statement->body.push_back(ParseStatement());
+	}
+
+	Expect(TokenType::RightCurlyBracket, "Expected '}' after body");
+
+	return statement;
 }
 
 static unique_ptr<Statement> ParseStatement()
@@ -459,6 +520,8 @@ static unique_ptr<Statement> ParseStatement()
 		return ParseVariableDeclarationStatement();
 	case TokenType::ID:
 		return ParseIdentifierExpression();
+	case TokenType::If:
+		return ParseIfStatement();
 	}
 
 	return ParseExpressionStatement();
@@ -466,7 +529,7 @@ static unique_ptr<Statement> ParseStatement()
 
 static unique_ptr<Statement> ParseCompoundStatement()
 {
-	Advance(); // Through {
+	Expect(TokenType::LeftCurlyBracket, "Expect '{' to begin compound statement");
 
 	auto compound = make_unique<Compound>();
 	Token* token = &parser->current;
@@ -475,11 +538,9 @@ static unique_ptr<Statement> ParseCompoundStatement()
 	while (token->type != TokenType::RightCurlyBracket && token->type != TokenType::Eof)
 	{
 		compound->statements.push_back(ParseStatement());
-
-		token = &parser->current;
 	}
 
-	Advance(); // Through }
+	Expect(TokenType::RightCurlyBracket, "Expect '}' to end compound statement");
 	return compound;
 }
 

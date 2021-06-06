@@ -1,4 +1,4 @@
-sum :: (float c) -> float
+main :: ()
 {
-	return (5.5 + 16.1);
+	bool b = false;
 }

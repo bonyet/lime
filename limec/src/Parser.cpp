@@ -113,7 +113,9 @@ static unique_ptr<Expression> ParseExpression(int priority)
 		Advance();  // Through operator
 
 		unique_ptr<Binary> binary = make_unique<Binary>();
-		binary->type = type;
+		binary->binaryType = type;
+		binary->type = left->type; // The type of the binary expression is the type of the left operand
+
 		binary->operatorToken = token;
 		binary->left = std::move(left);
 		binary->right = ParseExpression(newPriority);
@@ -158,7 +160,7 @@ static unique_ptr<Expression> ParseUnaryExpression()
 
 	// Suffix unary operators
 	{
-		Token next = parser->lexer->PeekNext(1);
+		Token next = parser->lexer->nextToken;
 
 		UnaryType type = (UnaryType)0;
 		switch (next.type)
@@ -210,11 +212,29 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 		{
 			return ParseIdentifierExpression();
 		}
+		case TokenType::True:
+		{
+			Advance();
+
+			auto primary = make_unique<PrimaryValue>();
+			primary->value.b32 = true;
+			primary->type = Type::Boolean;
+			return primary;
+		}
+		case TokenType::False:
+		{
+			Advance();
+
+			auto primary = make_unique<PrimaryValue>();
+			primary->value.b32 = false;
+			primary->type = Type::Boolean;
+			return primary;
+		}
 		case TokenType::Number:
 		{
 			Advance();
 
-			auto primary = make_unique<PrimaryNumber>();
+			auto primary = make_unique<PrimaryValue>();
 			primary->token = token;
 
 			// Integral or floating point?
@@ -248,6 +268,8 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 	{
 	case Parser::State::VariableInitializer:
 	{
+		// TODO: fix this shit? why is this here i dont remember
+
 		// Identifiers can be used as primary expressions such as:
 		// int b = 1;
 		// int a = b; <- b is a variable
@@ -281,6 +303,7 @@ static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 
 	// Find name
 	function->name.Copy(current->start, current->length);
+	function->type = Type::Void; // By default, functions return void
 
 	Advance(); // To ::
 	Advance(); // Through ::
@@ -331,7 +354,7 @@ static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 
 	Expect(TokenType::RightCurlyBracket, "Expected '}' after function body");
 	
-	if (function->indexOfReturnInBody == -1)
+	if (function->indexOfReturnInBody == -1 && function->type != Type::Void)
 	{
 		throw LimeError("Expected a return statement within '%s'", function->name.chars());
 	}
@@ -377,8 +400,8 @@ static unique_ptr<Expression> ParseIdentifierExpression()
 {
 	Token* current = &parser->current; // At :: if valid decl
 
-	Token next = parser->lexer->PeekNext(1);
-	switch (next.type)
+	Token* next = &parser->lexer->nextToken;
+	switch (next->type)
 	{
 	case TokenType::DoubleColon:
 		return ParseFunctionDeclaration();
@@ -386,7 +409,7 @@ static unique_ptr<Expression> ParseIdentifierExpression()
 		return ParseFunctionCall();
 	}
 
-	throw LimeError("Invalid identifier expression '%.*s'", next.length, next.start);
+	throw LimeError("Invalid identifier expression '%.*s'", next->length, next->start);
 }
 
 static unique_ptr<Statement> ParseVariableDeclarationStatement()
@@ -431,6 +454,8 @@ static unique_ptr<Statement> ParseStatement()
 	case TokenType::LeftCurlyBracket:
 		return ParseCompoundStatement();
 	case TokenType::Int:
+	case TokenType::Float:
+	case TokenType::Bool:
 		return ParseVariableDeclarationStatement();
 	case TokenType::ID:
 		return ParseIdentifierExpression();

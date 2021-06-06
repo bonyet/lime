@@ -50,7 +50,8 @@ struct Primary : public Expression
 	}
 };
 
-struct PrimaryNumber : public Primary
+// Stores int, float, or bool
+struct PrimaryValue : public Primary
 {
 	union
 	{
@@ -138,13 +139,13 @@ enum class BinaryType
 
 struct Binary : public Expression
 {
-	BinaryType type = (BinaryType)0;
+	BinaryType binaryType = (BinaryType)0;
 	Token operatorToken;
 	std::unique_ptr<Expression> left, right;
 
 	const char* GetStringType()
 	{
-		switch (type)
+		switch (binaryType)
 		{
 		case BinaryType::Add:          return "Add";
 		case BinaryType::Subtract:     return "Subtract";
@@ -251,7 +252,8 @@ struct FunctionDefinition : public Expression
 			base += statement->ToString(indent);
 		}
 
-		base += body[indexOfReturnInBody]->ToString(indent);
+		if (indexOfReturnInBody != -1)
+			base += body[indexOfReturnInBody]->ToString(indent);
 
 		indent -= 2;
 

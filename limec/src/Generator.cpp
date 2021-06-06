@@ -12,7 +12,7 @@ static std::unique_ptr<llvm::IRBuilder<>> builder;
 static std::unique_ptr<llvm::Module> module;
 static std::map<std::string, llvm::Value*> namedValues;
 
-void* PrimaryNumber::Generate()
+void* PrimaryValue::Generate()
 {
 	switch (type)
 	{
@@ -48,7 +48,7 @@ void* Binary::Generate()
 	Type opType = left->type;
 	
 	// please find me a better way of doing this
-	switch (type)
+	switch (binaryType)
 	{
 	case BinaryType::Add:
 	{
@@ -56,6 +56,7 @@ void* Binary::Generate()
 			return builder->CreateAdd(lhs, rhs, "addtmp");
 		if (opType == Type::Float)
 			return builder->CreateFAdd(lhs, rhs, "addtmp");
+		break;
 	}
 	case BinaryType::Subtract:
 	{
@@ -63,6 +64,7 @@ void* Binary::Generate()
 			return builder->CreateSub(lhs, rhs, "subtmp");
 		if (opType == Type::Float)
 			return builder->CreateFSub(lhs, rhs, "subtmp");
+		break;
 	}
 	case BinaryType::Multiply:
 	{
@@ -70,6 +72,7 @@ void* Binary::Generate()
 			return builder->CreateMul(lhs, rhs, "multmp");
 		if (opType == Type::Float)
 			return builder->CreateFMul(lhs, rhs, "multmp");
+		break;
 	}
 	case BinaryType::Divide:
 	{
@@ -77,6 +80,7 @@ void* Binary::Generate()
 			throw CompileError("Integer division not supported");
 		if (opType == Type::Float)
 			return builder->CreateFDiv(lhs, rhs, "divtmp");
+		break;
 	}
 	case BinaryType::Equal:
 	{
@@ -84,6 +88,7 @@ void* Binary::Generate()
 			return builder->CreateICmpEQ(lhs, rhs, "cmptmp");
 		if (opType == Type::Float)
 			return builder->CreateFCmpUEQ(lhs, rhs, "cmptmp");
+		break;
 	}
 	case BinaryType::Less:
 	{
@@ -91,6 +96,7 @@ void* Binary::Generate()
 			return builder->CreateICmpULT(lhs, rhs, "cmptmp");
 		if (opType == Type::Float)
 			return builder->CreateFCmpULT(lhs, rhs, "cmptmp");
+		break;
 	}
 	case BinaryType::LessEqual:
 	{
@@ -98,6 +104,7 @@ void* Binary::Generate()
 			return builder->CreateICmpULE(lhs, rhs, "cmptmp");
 		if (opType == Type::Float)
 			return builder->CreateFCmpULE(lhs, rhs, "cmptmp");
+		break;
 	}
 	case BinaryType::Greater:
 	{
@@ -105,6 +112,7 @@ void* Binary::Generate()
 			return builder->CreateICmpUGT(lhs, rhs, "cmptmp");
 		if (opType == Type::Float)
 			return builder->CreateFCmpUGT(lhs, rhs, "cmptmp");
+		break;
 	}
 	case BinaryType::GreaterEqual:
 	{
@@ -112,6 +120,7 @@ void* Binary::Generate()
 			return builder->CreateICmpUGE(lhs, rhs, "cmptmp");
 		if (opType == Type::Float)
 			return builder->CreateFCmpUGE(lhs, rhs, "cmptmp");
+		break;
 	}
 	default:
 		throw CompileError("Invalid binary operator");
@@ -154,6 +163,10 @@ static llvm::Type* GetLLVMType(Type type)
 		return llvm::Type::getInt32Ty(*context);
 	case Type::Float:
 		return llvm::Type::getFloatTy(*context);
+	case Type::Boolean:
+		return llvm::Type::getInt8Ty(*context); // A bool is just small int !
+	case Type::Void:
+		return llvm::Type::getVoidTy(*context);
 	}
 
 	throw CompileError("Unknown type");
@@ -162,8 +175,6 @@ static llvm::Type* GetLLVMType(Type type)
 
 void* FunctionDefinition::Generate()
 {
-	// TODO: correct types
-
 	llvm::Function* function = module->getFunction(name.chars());
 	// Create function if it doesn't exist
 	if (!function)
@@ -216,13 +227,13 @@ void* FunctionDefinition::Generate()
 	}
 
 	// Return value
-	llvm::Value* returnValue = (llvm::Value*)body[indexOfReturnInBody]->Generate();
+	llvm::Value* returnValue = indexOfReturnInBody != -1 ? (llvm::Value*)body[indexOfReturnInBody]->Generate() : nullptr;
 	builder->CreateRet(returnValue);
 
 	if (verifyFunction(*function, &llvm::errs()))
 	{
 		function->eraseFromParent();
-		throw CompileError("Invalid function");
+		printf("\n");
 	}
 
 	return function;

@@ -4,6 +4,7 @@ enum class Type
 {
 	// Primitives
 	Int = 1, Float, Boolean, 
+	Void,
 	String,
 };
 

@@ -9,6 +9,11 @@ static bool IsAtEnd()
 	return *lexer->current == '\0';
 }
 
+static bool IsWhitespace(char c)
+{
+	return c == ' ' || c == '\n' || c == '\t' || c == '\r' || c == '\v' || c == '\f';
+}
+
 static void Advance(int length)
 {
 	lexer->current += length;
@@ -19,10 +24,6 @@ static char Peek()
 	return *lexer->current;
 }
 
-static bool IsWhitespace(char c)
-{
-	return c == ' ' || c == '\n' || c == '\t' || c == '\r' || c == '\v' || c == '\f';
-}
 static bool IsAlpha(char c)
 {
 	return (c >= 'a' && c <= 'z') ||
@@ -131,21 +132,6 @@ static Token MakeToken(TokenType type, int length)
 	Advance(length);
 
 	return token;
-}
-
-static void IncrementIndex(int* index)
-{
-	*index += 1;
-	if (*index == Lexer::TOKEN_CACHE_SIZE)
-		*index = 0;
-}
-
-static int GetUndoDistance()
-{
-	if (lexer->currentIndex >= lexer->bufferIndex)
-		return lexer->currentIndex - lexer->bufferIndex;
-	else
-		return lexer->currentIndex + Lexer::TOKEN_CACHE_SIZE - lexer->bufferIndex;
 }
 
 static bool CheckKeyword(const char* keyword, int length)
@@ -281,23 +267,55 @@ static void ProcessToken(Token* token)
 
 	// Keywords
 	case 'i':
+	{
+		if (CheckKeyword("int", 3))
 		{
-			if (CheckKeyword("int", 3))
-			{
-				*token = MakeToken(TokenType::Int, 3);
-				return;
-			}
-			break;
+			*token = MakeToken(TokenType::Int, 3);
+			return;
 		}
+		break;
+	}
+	case 't':
+	{
+		if (CheckKeyword("true", 4))
+		{
+			*token = MakeToken(TokenType::True, 4);
+			return;
+		}
+		break;
+	}
+	case 'f':
+	{
+		if (CheckKeyword("float", 5))
+		{
+			*token = MakeToken(TokenType::Float, 5);
+			return;
+		}
+		else if (CheckKeyword("false", 5))
+		{
+			*token = MakeToken(TokenType::False, 5);
+			return;
+		}
+		break;
+	}
+	case 'b':
+	{
+		if (CheckKeyword("bool", 4))
+		{
+			*token = MakeToken(TokenType::Bool, 4);
+			return;
+		}
+		break;
+	}
 	case 'r':
+	{
+		if (CheckKeyword("return", 6))
 		{
-			if (CheckKeyword("return", 6))
-			{
-				*token = MakeToken(TokenType::Return, 6);
-				return;
-			}
-			break;
+			*token = MakeToken(TokenType::Return, 6);
+			return;
 		}
+		break;
+	}
 	}
 
 	// Handle end token
@@ -326,92 +344,27 @@ static void ProcessToken(Token* token)
 
 Token Lexer::Next()
 {
-	if (GetUndoDistance() > Lexer::TOKEN_UNDO_COUNT)
-	{
-		lexer->tokens[lexer->bufferIndex].valid = false;
-		IncrementIndex(&lexer->bufferIndex);
-	}
-
-	IncrementIndex(&lexer->currentIndex);
-
 	// Advance
 	SkipWhitespace();
 
 	start = current;
 
-	Token* token = &lexer->tokens[lexer->currentIndex].token;
+	previousToken = currentToken;
 
-	if (!lexer->tokens[lexer->currentIndex].valid) {
-		lexer->tokens[lexer->currentIndex].valid = true;
+	ProcessToken(&currentToken);
 
-		ProcessToken(token);
-	}
+	// We don't want the lexer to *actually* advance when we process the next token
+	// so instead I use this little hack to revert current to what it was before
+	const char* oldCurrent = current;
+	ProcessToken(&nextToken);
+	current = oldCurrent;
 
-	return *token;
-}
-
-Token Lexer::Retreat()
-{
-	lexer->currentIndex--;
-
-	return PeekNext(0);
-}
-
-Token Lexer::PeekNext(int amount)
-{
-	if (amount > TOKEN_PEEK_COUNT)
-	{
-		exit(6);
-	}
-
-	int index = lexer->currentIndex;
-	for (int i = 0; i < amount; i++)
-	{
-		IncrementIndex(&index);
-
-		if (!lexer->tokens[index].valid)
-		{
-			lexer->tokens[index].valid = true;
-			ProcessToken(&lexer->tokens[index].token);
-		}
-	}
-
-	return lexer->tokens[index].token;
-}
-
-Token Lexer::PeekPrevious(int depth)
-{
-	if (GetUndoDistance() > 1)
-	{
-		int index = lexer->currentIndex;
-		if (!lexer->currentIndex)
-		{
-			index = TOKEN_CACHE_SIZE - 1; // Wrap around if necessary
-			index++;
-		}
-
-		assert(lexer->tokens[index - 1].valid);
-		return lexer->tokens[index - 1].token;
-	}
-
-	exit(8);
-}
-
-Token Lexer::Consume()
-{
-	// TODO: Maybe not necessary?
-	return {};
-}
-
-Token Lexer::Skip(TokenType type)
-{
-	// TODO: Maybe not necessary?
-	return {};
+	return currentToken;
 }
 
 bool Lexer::Expect(TokenType type)
 {
-	return PeekNext(0).type == type;
+	return currentToken.type == type;
 }
 
 Lexer::Lexer(const char* source)

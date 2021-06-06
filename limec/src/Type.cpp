@@ -14,6 +14,8 @@ Type TypeFromString(const char* string)
 		return Type::Boolean;
 	case 's':
 		return Type::String;
+	case 'v':
+		return Type::Void; // I dunno if I want to do this
 	}
 	
 	throw LimeError("Invalid type string");

@@ -25,7 +25,7 @@ enum class TokenType : uint16_t
 	And, Or, If, Else,
 	True, False,
 	// Primitive type keywords, TODO: add more!
-	Int,
+	Int, Float, Bool,
 	Return,
 
 	// Misc
@@ -44,27 +44,14 @@ struct Token
 
 struct Lexer
 {
-	static constexpr int TOKEN_UNDO_COUNT = 5, TOKEN_PEEK_COUNT = 5;
-	static constexpr int TOKEN_CACHE_SIZE = TOKEN_UNDO_COUNT + TOKEN_PEEK_COUNT + 1; // + 1 for current
-
 	Lexer(const char* source);
 	
 	Token Next();
-	Token Retreat();
 
-	Token PeekNext(int amount); // Returns the next token without advancing
-	Token PeekPrevious(int depth); // Returns the previous token without reatreating
-
-	Token Consume(); // Return current token then advance
-	Token Skip(TokenType type); // Asserts that the current is of type, and then advances
 	bool Expect(TokenType type); // Returns whether or not current is of type 'type'
 
-	struct
-	{
-		Token token;
-		bool valid = false;
-	} tokens[TOKEN_CACHE_SIZE];
-	int currentIndex = 0, bufferIndex = 0;
+	// Used for peeking
+	Token previousToken, currentToken, nextToken;
 
 	int line = 1;
 	const char* current; // Current character

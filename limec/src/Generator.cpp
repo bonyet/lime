@@ -11,6 +11,7 @@ static std::unique_ptr<llvm::LLVMContext> context;
 static std::unique_ptr<llvm::IRBuilder<>> builder;
 static std::unique_ptr<llvm::Module> module;
 static std::map<std::string, llvm::Value*> namedValues;
+static llvm::Function* currentFunction = nullptr;
 
 // Utils
 static llvm::Type* GetLLVMType(Type type)
@@ -22,7 +23,7 @@ static llvm::Type* GetLLVMType(Type type)
 	case Type::Float:
 		return llvm::Type::getFloatTy(*context);
 	case Type::Boolean:
-		return llvm::Type::getInt1Ty(*context); // A bool is just small int !
+		return llvm::Type::getInt1Ty(*context);
 	case Type::Void:
 		return llvm::Type::getVoidTy(*context);
 	}
@@ -160,6 +161,50 @@ void* Binary::Generate()
 	}
 }
 
+void* Branch::Generate()
+{
+	using namespace llvm;
+
+	BasicBlock* parentBlock = builder->GetInsertBlock();
+
+	BasicBlock* trueBlock = BasicBlock::Create(*context, "btrue", currentFunction);
+	BasicBlock* falseBlock = BasicBlock::Create(*context, "bfalse", currentFunction);
+
+	// Create branch thing
+	BranchInst* branch = builder->CreateCondBr((Value*)expression->Generate(), trueBlock, falseBlock);
+
+	BasicBlock* endBlock = BasicBlock::Create(*context, "end", currentFunction);
+	// Generate bodies
+	{
+		builder->SetInsertPoint(trueBlock);
+		// Generate true body
+		for (auto& statement : ifBody)
+		{
+			statement->Generate();
+		}
+
+		// Add jump to end
+		builder->CreateBr(endBlock);
+
+		// Generate false body
+		builder->SetInsertPoint(falseBlock);
+		for (auto& statement : elseBody)
+		{
+			statement->Generate();
+		}
+
+		// Add jump to end
+		builder->CreateBr(endBlock);
+	}
+
+	builder->SetInsertPoint(parentBlock); // Reset to correct insert point
+
+	// Insert end block
+	builder->SetInsertPoint(endBlock);
+
+	return branch;
+}
+
 void* Call::Generate()
 {
 	using namespace llvm;
@@ -222,7 +267,7 @@ void* FunctionDefinition::Generate()
 		throw CompileError("Function cannot be redefined");
 	}
 
-	// Setup function body
+	currentFunction = function;
 
 	// Create block to start insertion into
 	llvm::BasicBlock* block = llvm::BasicBlock::Create(*context, "entry", function);

@@ -181,27 +181,22 @@ struct Binary : public Expression
 	void* Generate() override;
 };
 
-struct If : public Statement
+struct Branch : public Statement
 {
 	std::unique_ptr<Expression> expression;
-	std::vector<std::unique_ptr<Statement>> body;
+	std::vector<std::unique_ptr<Statement>> ifBody;
+	std::vector<std::unique_ptr<Statement>> elseBody;
+
+	bool hasElse = false;
 
 	String ToString(int& indent) override
 	{
-		String base = String::FromFormat("%*c| [If]:\n", indent, ' ');
-
-		indent += 2;
-		base += expression->ToString(indent);
-
-		for (auto& statement : body)
-		{
-			base += statement->ToString(indent);
-		}
-
-		indent -= 2;
+		String base = String::FromFormat("%*c| [Branch, %d]", indent, ' ', (int)hasElse);
 
 		return base;
 	}
+
+	void* Generate() override;
 };
 
 struct Call : public Expression

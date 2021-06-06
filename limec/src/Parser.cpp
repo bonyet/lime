@@ -482,11 +482,11 @@ static unique_ptr<Statement> ParseVariableDeclarationStatement()
 	return variableDecl;
 }
 
-static unique_ptr<Statement> ParseIfStatement()
+static unique_ptr<Statement> ParseBranchStatement()
 {
 	Token* current = &parser->current;
 
-	auto statement = make_unique<If>();
+	auto statement = make_unique<Branch>();
 
 	Advance(); // Through 'if'
 	
@@ -495,13 +495,29 @@ static unique_ptr<Statement> ParseIfStatement()
 
 	Expect(TokenType::LeftCurlyBracket, "Expected '{' after expression");
 
-	// Parse body
+	// Parse if body
 	while (current->type != TokenType::RightCurlyBracket)
 	{
-		statement->body.push_back(ParseStatement());
+		statement->ifBody.push_back(ParseStatement());
 	}
 
 	Expect(TokenType::RightCurlyBracket, "Expected '}' after body");
+
+	if (statement->hasElse = current->type == TokenType::Else)
+	{
+		// We have an else body
+		Advance(); // Through else
+
+		Expect(TokenType::LeftCurlyBracket, "Expected '{' after else");
+
+		// Parse else body
+		while (current->type != TokenType::RightCurlyBracket)
+		{
+			statement->elseBody.push_back(ParseStatement());
+		}
+
+		Expect(TokenType::RightCurlyBracket, "Expected '}' after body");
+	}
 
 	return statement;
 }
@@ -521,7 +537,7 @@ static unique_ptr<Statement> ParseStatement()
 	case TokenType::ID:
 		return ParseIdentifierExpression();
 	case TokenType::If:
-		return ParseIfStatement();
+		return ParseBranchStatement();
 	}
 
 	return ParseExpressionStatement();

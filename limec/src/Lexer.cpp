@@ -1,5 +1,11 @@
 #include "Lexer.h"
+
+#include <memory>
+#include <string>
+#include "Utils.h"
+
 #include "Error.h"
+
 #include <cassert>
 
 static Lexer* lexer;

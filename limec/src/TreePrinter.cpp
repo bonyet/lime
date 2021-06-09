@@ -3,7 +3,7 @@
 static void PrintCompound(Compound* compound)
 {
 	int indent = 0;
-	printf("%s", compound->ToString(indent).chars());
+	printf("%s", compound->ToString(indent).c_str());
 }
 
 void PrintStatement(Statement* statement)
@@ -17,7 +17,7 @@ void PrintStatement(Statement* statement)
 	else
 	{
 		int indent = 0;
-		printf("%s", statement->ToString(indent).chars());
+		printf("%s", statement->ToString(indent).c_str());
 	}
 
 	printf("\n\n");

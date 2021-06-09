@@ -1,7 +1,5 @@
 #pragma once
 
-#include "String.h"
-
 // Error during parsing / lexing
 struct LimeError : std::exception
 {
@@ -10,11 +8,11 @@ struct LimeError : std::exception
 	template<typename... Args>
 	LimeError(const char* format, Args&&... args)
 	{
-		const String formatLine = String::FromFormat("[Line %d]: ", GetLine());
-		message = formatLine + String::FromFormat(format, std::forward<Args>(args)...);
+		const auto formatLine = FormatString("[Line %d]: ", GetLine());
+		message = formatLine + FormatString(format, std::forward<Args>(args)...);
 	}
 
-	String message;
+	std::string message;
 };
 
 // Error during code gen
@@ -22,9 +20,9 @@ struct CompileError : std::exception
 {
 	template<typename... Args>
 	CompileError(const char* format, Args&&... args)
+		: message(FormatString(format, std::forward<Args>(args)...))
 	{
-		message = String::FromFormat(format, std::forward<Args>(args)...);
 	}
 
-	String message;
+	std::string message;
 };

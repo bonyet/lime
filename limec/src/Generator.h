@@ -8,5 +8,5 @@ public:
 	Generator();
 	~Generator();
 
-	void Generate(std::unique_ptr<struct Compound> module);
+	void Generate(std::unique_ptr<Compound> module);
 };

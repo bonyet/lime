@@ -3,10 +3,27 @@
 #include "TreePrinter.h"
 #include "Error.h"
 
+#include <unordered_map>
+#include "Scope.h"
+
 static Parser* parser;
 
 using std::unique_ptr;
 using std::make_unique;
+
+static std::vector<Scope> scopes;
+
+// C-like helper function to check if a string contains a char up to a certain amount of characters
+static bool strnchr(const char* string, const char c, int n)
+{
+	for (int i = 0; i < n; i++)
+	{
+		if (string[i] == c)
+			return true;
+	}
+
+	return false;
+}
 
 int LimeError::GetLine()
 {
@@ -28,6 +45,7 @@ static Token Consume()
 static void DeepenScope()
 {
 	parser->scopeDepth++;
+	parser->scope = &scopes.emplace_back();
 }
 static void IncreaseScope()
 {
@@ -35,7 +53,24 @@ static void IncreaseScope()
 	if (parser->scopeDepth <= 0)
 		throw LimeError("Cannot decrease a scope depth of 0");
 #endif
-	parser->scopeDepth--;
+	parser->scope = &scopes[--parser->scopeDepth];
+}
+static int NumScopes() { return (int)scopes.size();  }
+
+static void RegisterVariable(const std::string& name, Type varType)
+{
+	parser->scope->namedVariableTypes[name] = varType;
+}
+static bool VariableExistsInScope(const std::string& name)
+{
+	return parser->scope->namedVariableTypes.count(name) == 1;
+}
+static Type GetVariableType(const std::string& name)
+{
+	if (!VariableExistsInScope(name))
+		return (Type)0;
+
+	return parser->scope->namedVariableTypes[name];
 }
 
 template<typename... Args>
@@ -273,7 +308,7 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 			primary->type = Type::String;
 			primary->token = token;
 
-			primary->string.Copy(token.start, token.length);
+			primary->value = std::string(token.start, token.length);
 			return primary;
 		}
 	}
@@ -316,8 +351,11 @@ static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 	auto function = make_unique<FunctionDefinition>();
 
 	// Find name
-	function->name.Copy(current->start, current->length);
+	function->name = std::string(current->start, current->length);
 	function->type = Type::Void; // By default, functions return void
+	function->scopeIndex = NumScopes();
+
+	DeepenScope();
 
 	Advance(); // To ::
 	Advance(); // Through ::
@@ -330,8 +368,11 @@ static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 		param.type = TypeFromString(current->start);
 
 		Advance(); // Through type
-		param.name.Copy(current->start, current->length);
-		function->params.push_back(std::move(param));
+		param.name = std::string(current->start, current->length);
+		function->params.push_back(param);
+
+		// Register to scope
+		RegisterVariable(param.name, param.type);
 
 		Advance();
 		if (current->type != TokenType::RightParen)
@@ -352,7 +393,7 @@ static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 
 	Expect(TokenType::LeftCurlyBracket, "Expected '{' after function declaration");
 
-	DeepenScope();
+	IncreaseScope();
 
 	// Parse body
 	int statementIndex = 0;
@@ -370,11 +411,9 @@ static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 
 	Expect(TokenType::RightCurlyBracket, "Expected '}' after function body");
 	
-	IncreaseScope();
-
 	if (function->indexOfReturnInBody == -1 && function->type != Type::Void)
 	{
-		throw LimeError("Expected a return statement within '%s'", function->name.chars());
+		throw LimeError("Expected a return statement within '%s'", function->name.c_str());
 	}
 
 	return function;
@@ -389,7 +428,7 @@ static unique_ptr<Call> ParseFunctionCall()
 	Token* current = &parser->current;
 
 	auto call = make_unique<Call>();
-	call->fnName.Copy(current->start, current->length);
+	call->fnName = std::string(current->start, current->length);
 
 	Advance(); // Through name
 	Advance(); // Through (
@@ -421,7 +460,8 @@ static unique_ptr<Expression> ParseVariableExpression()
 	Token* current = &parser->current;
 
 	auto variable = make_unique<Variable>();
-	variable->name.Copy(current->start, current->length);
+	variable->name = std::string(current->start, current->length);
+	variable->type = GetVariableType(variable->name);
 
 	Advance(); // Through identifier
 
@@ -454,16 +494,17 @@ static unique_ptr<Statement> ParseVariableDeclarationStatement()
 
 	Advance(); // Through name
 
-	auto variableDecl = make_unique<VariableDefinition>();
-	variableDecl->scope = parser->scopeDepth;
-	variableDecl->name.Copy(nameToken.start, nameToken.length);
-	variableDecl->type = TypeFromString(typeToken.start);
+	auto variable = make_unique<VariableDefinition>();
+	variable->scope = parser->scopeDepth;
+	variable->name = std::string(nameToken.start, nameToken.length);
+	variable->type = TypeFromString(typeToken.start);
+	RegisterVariable(variable->name, variable->type);
 
 	// No initializer
 	if (parser->current.type == TokenType::Semicolon)
 	{
 		Advance(); // Through ;
-		return variableDecl;
+		return variable;
 	}
 	else if (parser->current.type == TokenType::Equal)
 	{
@@ -472,14 +513,14 @@ static unique_ptr<Statement> ParseVariableDeclarationStatement()
 		Advance(); // Through =
 		
 		// Parse initializer
-		variableDecl->initializer = ParseExpression(-1);
+		variable->initializer = ParseExpression(-1);
 
 		Expect(TokenType::Semicolon, "Expected ';' after expression");
 
 		ResetState();
 	}
 
-	return variableDecl;
+	return variable;
 }
 
 static unique_ptr<Statement> ParseBranchStatement()
@@ -495,6 +536,8 @@ static unique_ptr<Statement> ParseBranchStatement()
 
 	Expect(TokenType::LeftCurlyBracket, "Expected '{' after expression");
 
+	DeepenScope();
+
 	// Parse if body
 	while (current->type != TokenType::RightCurlyBracket)
 	{
@@ -502,6 +545,10 @@ static unique_ptr<Statement> ParseBranchStatement()
 	}
 
 	Expect(TokenType::RightCurlyBracket, "Expected '}' after body");
+
+	// Else should be a different scope from if
+	IncreaseScope();
+	DeepenScope();
 
 	if (statement->hasElse = current->type == TokenType::Else)
 	{
@@ -518,6 +565,8 @@ static unique_ptr<Statement> ParseBranchStatement()
 
 		Expect(TokenType::RightCurlyBracket, "Expected '}' after body");
 	}
+
+	IncreaseScope();
 
 	return statement;
 }
@@ -547,6 +596,8 @@ static unique_ptr<Statement> ParseCompoundStatement()
 {
 	Expect(TokenType::LeftCurlyBracket, "Expect '{' to begin compound statement");
 
+	DeepenScope();
+
 	auto compound = make_unique<Compound>();
 	Token* token = &parser->current;
 
@@ -555,6 +606,8 @@ static unique_ptr<Statement> ParseCompoundStatement()
 	{
 		compound->statements.push_back(ParseStatement());
 	}
+
+	IncreaseScope();
 
 	Expect(TokenType::RightCurlyBracket, "Expect '}' to end compound statement");
 	return compound;
@@ -593,7 +646,7 @@ ParseResult Parser::Parse(Lexer* lexer)
 	}
 	catch (LimeError& error)
 	{
-		fprintf(stderr, "\n%s\n", error.message.chars());
+		fprintf(stderr, "\n%s\n", error.message.c_str());
 
 		result.Succeeded = false;
 		result.module = nullptr;

@@ -26,4 +26,5 @@ struct Parser
 	State state = State::Default;
 	Token current;
 	Lexer* lexer = nullptr;
+	struct Scope* scope;
 };

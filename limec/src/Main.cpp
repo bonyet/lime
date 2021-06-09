@@ -1,5 +1,4 @@
 #include <iostream>
-#include "String.h"
 #include "Parser.h"
 
 #include <chrono>
@@ -7,9 +6,9 @@
 
 #include "Generator.h"
 
-static String ReadFile(const char* filepath)
+static std::string ReadFile(const char* filepath)
 {
-	String fileContents;
+	std::string fileContents;
 
 	// Read file
 	std::ifstream stream(filepath);
@@ -21,10 +20,10 @@ static String ReadFile(const char* filepath)
 	}
 
 	stream.seekg(0, std::ios::end);
-	fileContents.Reserve((int)stream.tellg() + 1); // Room for null-terminating character
+	fileContents.reserve((int)stream.tellg() + 1); // Room for null-terminating character
 	stream.seekg(0, std::ios::beg);
 
-	fileContents.Assign(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+	fileContents.assign(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
 
 	return fileContents;
 }
@@ -43,13 +42,12 @@ int main(int argc, const char* argv[])
 #endif
 
 	const char* mainPath = "main.lm";
-	String contents = ReadFile(mainPath);
+	std::string contents = ReadFile(mainPath);
 	
-	Lexer lexer = Lexer(contents.chars());
+	Lexer lexer = Lexer(contents.c_str());
 	Parser parser;
 
 	ParseResult parseResult = parser.Parse(&lexer);
-	printf(parseResult.Succeeded ? "Parsing succeeded\n" : "Parsing failed\n");
 	printf("\n");
 
 	if (parseResult.Succeeded)

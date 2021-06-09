@@ -1,8 +1,5 @@
-sum :: (int a) -> int, bool
+main :: () -> int
 {
-	return 3 and true;
-}
-
-main :: ()
-{
+	int c = 5;
+	return c;
 }

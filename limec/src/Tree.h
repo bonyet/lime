@@ -1,16 +1,17 @@
 #pragma once
 
 #include "Lexer.h"
-#include "String.h"
 #include "Type.h"
 
+#include <string>
+#include "Utils.h"
+
 #include <llvm\IR\Value.h>
-#include <list>
 
 struct Statement
 {
 	virtual ~Statement() {}
-	virtual String ToString(int& indent) { return "| [Statement]\n"; }
+	virtual std::string ToString(int& indent) { return "| [Statement]\n"; }
 
 	virtual void* Generate() { return nullptr; }
 };
@@ -20,9 +21,9 @@ struct Compound : public Statement
 {
 	std::vector<std::unique_ptr<Statement>> statements;
 
-	String ToString(int& indent) override
+	std::string ToString(int& indent) override
 	{
-		String string = indent > 0 ? "| [Compound]:\n" : "[Compound]:\n";
+		std::string string = indent > 0 ? "| [Compound]:\n" : "[Compound]:\n";
 
 		for (auto& statement : statements)
 		{
@@ -42,11 +43,9 @@ struct Primary : public Expression
 {
 	Token token;
 
-	String ToString(int& indent) override
+	std::string ToString(int& indent) override
 	{
-		String result;
-		result.Format("| [Primary]: %.*s\n", token.length, token.start);
-		return result;
+		return FormatString("| [Primary]: % .*s\n", token.length, token.start);
 	}
 };
 
@@ -60,20 +59,20 @@ struct PrimaryValue : public Primary
 		float f32;
 	} value;
 
-	String ToString(int& indent) override
+	std::string ToString(int& indent) override
 	{
-		String base = String::FromFormat("%*c| [Primary]: ", indent, ' ');
+		std::string base = FormatString("%*c| [Primary]: ", indent, ' ');
 
 		switch (type)
 		{
 		case Type::Int:
-			base += String::FromFormat("%i\n", value.i32);
+			base += FormatString("%i\n", value.i32);
 			break;
 		case Type::Float:
-			base += String::FromFormat("%f\n", value.f32);
+			base += FormatString("%f\n", value.f32);
 			break;
 		case Type::Boolean:
-			base += String::FromFormat("%s\n", value.b32 ? "true" : "false");
+			base += FormatString("%s\n", value.b32 ? "true" : "false");
 			break;
 		}
 		
@@ -85,11 +84,11 @@ struct PrimaryValue : public Primary
 
 struct PrimaryString : public Primary
 {
-	String string;
+	std::string value;
 
-	String ToString(int& indent) override
+	std::string ToString(int& indent) override
 	{
-		return String::FromFormat("| [Primary]: %s\n", string.chars());
+		return FormatString("| [Primary]: %s\n", value.c_str());
 	}
 };
 
@@ -120,9 +119,9 @@ struct Unary : public Expression
 		return "<???>";
 	}
 
-	String ToString(int& indent) override
+	std::string ToString(int& indent) override
 	{
-		String result = String::FromFormat(GetLabel(), indent, ' ');
+		std::string result = FormatString(GetLabel(), indent, ' ');
 		result += operand->ToString(indent);
 		return result;
 	}
@@ -165,14 +164,12 @@ struct Binary : public Expression
 		return "<???>";
 	}
 
-	String ToString(int& indent) override
+	std::string ToString(int& indent) override
 	{
-		String result;
-
-		result.Format("%*c| [%s]:\n%*c", indent, ' ', GetStringType(), indent + 2, ' ');
+		std::string result = FormatString("%*c| [%s]:\n%*c", indent, ' ', GetStringType(), indent + 2, ' ');
 
 		result += left->ToString(indent);
-		result += String::FromFormat("%*c", indent + 2, ' ');
+		result += FormatString("%*c", indent + 2, ' ');
 		result += right->ToString(indent);
 
 		return result;
@@ -189,9 +186,9 @@ struct Branch : public Statement
 
 	bool hasElse = false;
 
-	String ToString(int& indent) override
+	std::string ToString(int& indent) override
 	{
-		String base = String::FromFormat("%*c| [Branch, %d]", indent, ' ', (int)hasElse);
+		std::string base = FormatString("%*c| [Branch, %d]", indent, ' ', (int)hasElse);
 
 		return base;
 	}
@@ -201,12 +198,12 @@ struct Branch : public Statement
 
 struct Call : public Expression
 {
-	String fnName;
+	std::string fnName;
 	std::vector<std::unique_ptr<Expression>> args;
 
-	String ToString(int& indent) override
+	std::string ToString(int& indent) override
 	{
-		String base = String::FromFormat("| [call %s]:\n", fnName.chars());
+		std::string base = FormatString("| [call %s]:\n", fnName.c_str());
 
 		for (int i = 0; i < args.size(); ++i)
 		{
@@ -223,9 +220,9 @@ struct Return : public Expression
 {
 	std::unique_ptr<Expression> expression;
 
-	String ToString(int& indent) override
+	std::string ToString(int& indent) override
 	{
-		String base = "| [return]:\n";
+		std::string base = "| [return]:\n";
 
 		indent += 2;
 		base += expression->ToString(indent);
@@ -242,18 +239,19 @@ struct FunctionDefinition : public Expression
 {
 	struct Parameter
 	{
-		String name;
+		std::string name;
 		Type type = (Type)0;
 	};
 
-	String name;
+	std::string name;
 	std::vector<Parameter> params;
 	int indexOfReturnInBody = -1;
 	std::vector<std::unique_ptr<Statement>> body;
+	int scopeIndex = -1; // index into parser's scope container
 
-	String ToString(int& indent) override
+	std::string ToString(int& indent) override
 	{
-		String base = String::FromFormat("| [%s(", name.chars());
+		std::string base = FormatString("| [%s(", name.c_str());
 
 		for (int i = 0; i < params.size(); ++i)
 		{
@@ -291,12 +289,12 @@ struct VariableDefinition : public Statement
 {
 	std::unique_ptr<Expression> initializer;
 	int scope = -1;
-	String name;
+	std::string name;
 	Type type;
 
-	String ToString(int& indent) override
+	std::string ToString(int& indent) override
 	{
-		return String::FromFormat("| [VariableDef]: %s\n", name.chars());
+		return FormatString("| [VariableDef]: %s\n", name.c_str());
 	}
 
 	void* Generate() override;
@@ -304,11 +302,11 @@ struct VariableDefinition : public Statement
 
 struct Variable : public Expression
 {
-	String name;
+	std::string name;
 
-	String ToString(int& indent) override
+	std::string ToString(int& indent) override
 	{
-		return String::FromFormat("| [IDRead]: %s\n", name.chars());
+		return FormatString("| [IDRead]: %s\n", name.c_str());
 	}
 
 	void* Generate() override;

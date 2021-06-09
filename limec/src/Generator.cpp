@@ -1,7 +1,9 @@
-#include "Generator.h"
+#include <string>
+#include "Utils.h"
 
 #include "Error.h"
-#include "Type.h"
+
+#include "Generator.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/IRBuilder.h>
@@ -10,8 +12,9 @@
 static std::unique_ptr<llvm::LLVMContext> context;
 static std::unique_ptr<llvm::IRBuilder<>> builder;
 static std::unique_ptr<llvm::Module> module;
-static std::map<std::string, llvm::Value*> namedValues;
 static llvm::Function* currentFunction = nullptr;
+
+static std::unordered_map<std::string, llvm::Value*> namedValues;
 
 // Utils
 static llvm::Type* GetLLVMType(Type type)
@@ -29,7 +32,6 @@ static llvm::Type* GetLLVMType(Type type)
 	}
 
 	throw CompileError("Unknown type");
-	return nullptr;
 }
 
 void* PrimaryValue::Generate()
@@ -50,9 +52,10 @@ void* VariableDefinition::Generate()
 	using namespace llvm;
 
 	// Allocate on the stack
-	AllocaInst* allocaInst = builder->CreateAlloca(GetLLVMType(type), nullptr, name.chars());
-	StoreInst* storeInst = builder->CreateStore((Value*)initializer->Generate(), allocaInst, false);
-	namedValues.emplace(name.chars(), allocaInst);
+	AllocaInst* allocaInst = builder->CreateAlloca(GetLLVMType(type), nullptr, name);
+	namedValues[name] = allocaInst;
+	Value* value = (Value*)initializer->Generate();
+	StoreInst* storeInst = builder->CreateStore(value, allocaInst);
 
 	return allocaInst;
 }
@@ -61,11 +64,11 @@ void* Variable::Generate()
 {
 	using namespace llvm;
 
-	Value* value = namedValues[name.chars()];
+	Value* value = namedValues[name];
 	if (!value)
-		throw CompileError("Unknown variable name");
+		throw CompileError("Unknown variable name '%s'", name.c_str());
 
-	return builder->CreateLoad(namedValues[name.chars()], name.chars());
+	return builder->CreateLoad(value, name);
 }
 
 void* Binary::Generate()
@@ -76,6 +79,7 @@ void* Binary::Generate()
 	if (!lhs || !rhs)
 		throw CompileError("Invalid binary operator"); // What happon
 
+	// TODO: correct types for variables
 	if (right->type != left->type)
 		throw CompileError("Both operands of a binary operation must be of the same type");
 
@@ -210,32 +214,52 @@ void* Call::Generate()
 	using namespace llvm;
 
 	// Look up function name
-	Function* func = module->getFunction(fnName.chars());
+	Function* func = module->getFunction(fnName);
 	if (!func)
 		throw CompileError("Unknown function referenced");
 
 	// Handle arg mismatch
 	if (func->arg_size() != args.size())
-		throw CompileError("Incorrect number of arguments passed to '%s'", fnName.chars());
+		throw CompileError("Incorrect number of arguments passed to '%s'", fnName.c_str());
 
 	// Generate arguments
 	std::vector<Value*> argValues;
 	for (auto& expression : args)
 	{
 		Value* generated = (Value*)expression->Generate();
-		argValues.push_back(generated);
 		if (!generated)
-		{
 			throw CompileError("Failed to generate function argument");
-		}
+		
+		argValues.push_back(generated);
 	}
 
-	return (Value*)builder->CreateCall(func, argValues, "calltmp");
+	return builder->CreateCall(func, argValues);
+}
+
+static void GenerateEntryBlockAllocas(llvm::Function* function)
+{
+	using namespace llvm;
+
+	for (auto& arg : function->args())
+	{
+		llvm::Type* type = arg.getType();
+
+		if (arg.hasAttribute(Attribute::ByRef))
+		{
+			type = type->getPointerTo();
+		}
+
+		auto name = arg.getName(); // Not free!
+		name = name.drop_back(1); // Remove arg suffix
+
+		AllocaInst* allocaInst = builder->CreateAlloca(type, nullptr, name);
+		namedValues[name.str()] = allocaInst;
+	}
 }
 
 void* FunctionDefinition::Generate()
 {
-	llvm::Function* function = module->getFunction(name.chars());
+	llvm::Function* function = module->getFunction(name.c_str());
 	// Create function if it doesn't exist
 	if (!function)
 	{
@@ -245,21 +269,20 @@ void* FunctionDefinition::Generate()
 		int index = 0;
 		for (auto& param : params)
 			paramTypes[index++] = GetLLVMType(param.type);
-		
 		index = 0; // Reuse later
 
 		llvm::Type* returnType = GetLLVMType(type);
 
 		if (!returnType)
-			throw CompileError("Invalid return type for '%s'", name.chars());
+			throw CompileError("Invalid return type for '%s'", name.c_str());
 
 		llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
-		function = llvm::Function::Create(functionType, llvm::Function::ExternalLinkage, name.chars(), *module);
+		function = llvm::Function::Create(functionType, llvm::Function::ExternalLinkage, name.c_str(), *module);
 
 		// Set names for function args
 		for (auto& arg : function->args())
 		{
-			arg.setName(params[index++].name.chars());
+			arg.setName(params[index++].name + '_'); // Suffix arguments with '_' to make stuff work
 		}
 	}
 	if (!function->empty())
@@ -273,16 +296,17 @@ void* FunctionDefinition::Generate()
 	llvm::BasicBlock* block = llvm::BasicBlock::Create(*context, "entry", function);
 	builder->SetInsertPoint(block);
 
-	// Record args into values map
+	// Allocate args
 	namedValues.clear();
-	for (auto& arg : function->args())
-	{
-		namedValues[arg.getName().str()] = &arg;
-	}
+	GenerateEntryBlockAllocas(function);
 
 	// Generate body
+	int index = 0;
 	for (auto& statement : body)
 	{
+		if (index++ == indexOfReturnInBody)
+			continue; // Don't generate return statements twice
+
 		statement->Generate();
 	}
 
@@ -302,7 +326,7 @@ void* FunctionDefinition::Generate()
 Generator::Generator()
 {
 	context = std::make_unique<llvm::LLVMContext>();
-	module = std::make_unique<llvm::Module>("Code Module", *context);
+	module = std::make_unique<llvm::Module>("Module", *context);
 	builder = std::make_unique<llvm::IRBuilder<>>(*context);
 }
 
@@ -321,7 +345,7 @@ void Generator::Generate(std::unique_ptr<struct Compound> compound)
 	}
 	catch (CompileError& err)
 	{
-		fprintf(stderr, "CodeGenError: %s\n\n", err.message.chars());
+		fprintf(stderr, "CodeGenError: %s\n\n", err.message.c_str());
 	}
 
 	module->print(llvm::errs(), nullptr);

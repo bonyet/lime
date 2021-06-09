@@ -1,4 +1,8 @@
 #include "Type.h"
+#include <memory>
+
+#include <string>
+#include "Utils.h"
 
 #include "Error.h"
 

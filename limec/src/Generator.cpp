@@ -83,6 +83,9 @@ void* Binary::Generate()
 	if (right->type != left->type)
 		throw CompileError("Both operands of a binary operation must be of the same type");
 
+	if (right->type == (Type)0 || left->type == (Type)0)
+		throw CompileError("Invalid operands for binary operation");
+
 	Type opType = left->type;
 	
 	// please find me a better way of doing this
@@ -209,12 +212,34 @@ void* Branch::Generate()
 	return branch;
 }
 
+static const char* LLVMTypeStringFromType(Type type)
+{
+	switch (type)
+	{
+	case Type::Int:     return "i32";
+	case Type::Float:   return "float";
+	case Type::Boolean: return "i1";
+	default:
+		throw CompileError("Invalid function call argument type");
+	}
+}
+
+static void MangleFunctionName(std::string& name, const std::vector<FunctionDefinition::Parameter>& params)
+{
+	for (auto& param : params)
+		name += LLVMTypeStringFromType(param.type);
+}
+
 void* Call::Generate()
 {
-	using namespace llvm;
+	// Mangle the function call name
+	for (auto& arg : args)
+	{
+		fnName += LLVMTypeStringFromType(arg->type);
+	}
 
 	// Look up function name
-	Function* func = module->getFunction(fnName);
+	llvm::Function* func = module->getFunction(fnName);
 	if (!func)
 		throw CompileError("Unknown function referenced");
 
@@ -223,17 +248,17 @@ void* Call::Generate()
 		throw CompileError("Incorrect number of arguments passed to '%s'", fnName.c_str());
 
 	// Generate arguments
-	std::vector<Value*> argValues;
+	std::vector<llvm::Value*> argValues;
 	for (auto& expression : args)
 	{
-		Value* generated = (Value*)expression->Generate();
+		llvm::Value* generated = (llvm::Value*)expression->Generate();
 		if (!generated)
 			throw CompileError("Failed to generate function argument");
 		
 		argValues.push_back(generated);
 	}
 
-	return builder->CreateCall(func, argValues);
+	return builder->CreateCall(func, argValues, "calltmp");
 }
 
 static void GenerateEntryBlockAllocas(llvm::Function* function)
@@ -249,16 +274,18 @@ static void GenerateEntryBlockAllocas(llvm::Function* function)
 			type = type->getPointerTo();
 		}
 
-		auto name = arg.getName(); // Not free!
-		name = name.drop_back(1); // Remove arg suffix
+		std::string name = arg.getName().str();
+		name.pop_back(); // Remove arg suffix
 
 		AllocaInst* allocaInst = builder->CreateAlloca(type, nullptr, name);
-		namedValues[name.str()] = allocaInst;
+		namedValues[name] = allocaInst;
 	}
 }
 
 void* FunctionDefinition::Generate()
 {
+	MangleFunctionName(name, params);
+
 	llvm::Function* function = module->getFunction(name.c_str());
 	// Create function if it doesn't exist
 	if (!function)
@@ -290,7 +317,7 @@ void* FunctionDefinition::Generate()
 		throw CompileError("Function cannot be redefined");
 	}
 
-	currentFunction = function;
+	currentFunction = function;	
 
 	// Create block to start insertion into
 	llvm::BasicBlock* block = llvm::BasicBlock::Create(*context, "entry", function);

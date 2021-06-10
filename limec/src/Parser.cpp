@@ -11,7 +11,10 @@ static Parser* parser;
 using std::unique_ptr;
 using std::make_unique;
 
-static std::vector<Scope> scopes;
+static std::vector<Scope> scopes =
+{
+	{ }
+};
 
 // C-like helper function to check if a string contains a char up to a certain amount of characters
 static bool strnchr(const char* string, const char c, int n)
@@ -61,14 +64,17 @@ static void RegisterVariable(const std::string& name, Type varType)
 {
 	parser->scope->namedVariableTypes[name] = varType;
 }
-static bool VariableExistsInScope(const std::string& name)
+static bool VariableExistsInScope(const std::string& name, Scope* scope = nullptr)
 {
+	if (scope)
+		return scope->namedVariableTypes.count(name) == 1;
+
 	return parser->scope->namedVariableTypes.count(name) == 1;
 }
-static Type GetVariableType(const std::string& name)
+static Type GetVariableType(const std::string& name, Scope* scope = nullptr)
 {
-	if (!VariableExistsInScope(name))
-		return (Type)0;
+	if (scope)
+		return scope->namedVariableTypes[name];
 
 	return parser->scope->namedVariableTypes[name];
 }
@@ -393,8 +399,6 @@ static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 
 	Expect(TokenType::LeftCurlyBracket, "Expected '{' after function declaration");
 
-	IncreaseScope();
-
 	// Parse body
 	int statementIndex = 0;
 	while (current->type != TokenType::RightCurlyBracket)
@@ -408,6 +412,8 @@ static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 
 		statementIndex++;
 	}
+
+	IncreaseScope();
 
 	Expect(TokenType::RightCurlyBracket, "Expected '}' after function body");
 	

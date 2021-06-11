@@ -14,6 +14,7 @@ static std::unique_ptr<llvm::IRBuilder<>> builder;
 static std::unique_ptr<llvm::Module> module;
 static llvm::Function* currentFunction = nullptr;
 
+static std::unordered_map<std::string, llvm::Value*> namedGlobals;
 static std::unordered_map<std::string, llvm::Value*> namedValues;
 
 // Utils
@@ -51,11 +52,31 @@ void* VariableDefinition::Generate()
 {
 	using namespace llvm;
 
+	llvm::Type* type = GetLLVMType(this->type);
+	if (scope == 0)
+	{
+		// Global varable
+		module->getOrInsertGlobal(name, type);
+		GlobalVariable* gVar = module->getNamedGlobal(name);
+		gVar->setLinkage(GlobalValue::CommonLinkage);
+
+		if (initializer)
+			gVar->setInitializer((Constant*)initializer->Generate());
+
+		namedGlobals[name] = gVar;
+
+		return gVar;
+	}
+
 	// Allocate on the stack
-	AllocaInst* allocaInst = builder->CreateAlloca(GetLLVMType(type), nullptr, name);
+	AllocaInst* allocaInst = builder->CreateAlloca(type, nullptr, name);
 	namedValues[name] = allocaInst;
-	Value* value = (Value*)initializer->Generate();
-	StoreInst* storeInst = builder->CreateStore(value, allocaInst);
+
+	if (initializer)
+	{
+		Value* value = (Value*)initializer->Generate();
+		StoreInst* storeInst = builder->CreateStore(value, allocaInst);
+	}
 
 	return allocaInst;
 }
@@ -64,11 +85,15 @@ void* Variable::Generate()
 {
 	using namespace llvm;
 
-	Value* value = namedValues[name];
-	if (!value)
-		throw CompileError("Unknown variable name '%s'", name.c_str());
+	// Load global or local variable
+	// TODO: enforce shadowing rules
+	Value* value = nullptr;
+	if (value = namedGlobals[name])
+		return builder->CreateLoad(value, "loadtmp");
+	else if (Value* value = namedValues[name])
+		return builder->CreateLoad(value, "loadtmp");
 
-	return builder->CreateLoad(value, name);
+	throw CompileError("Unknown variable '%s'", name.c_str());
 }
 
 void* Binary::Generate()
@@ -121,6 +146,11 @@ void* Binary::Generate()
 			throw CompileError("Integer division not supported");
 		if (opType == Type::Float)
 			return builder->CreateFDiv(lhs, rhs, "divtmp");
+		break;
+	}
+	case BinaryType::Assign:
+	{
+		// TODO: mutable variables
 		break;
 	}
 	case BinaryType::Equal:

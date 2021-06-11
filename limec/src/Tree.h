@@ -97,6 +97,8 @@ enum class UnaryType
 	Negate = 1,
 	PrefixIncrement, PrefixDecrement,
 	PostfixIncrement, PostfixDecrement,
+
+	AddressOf, Deref, // TODO: implement
 };
 
 struct Unary : public Expression
@@ -114,6 +116,9 @@ struct Unary : public Expression
 		case UnaryType::PrefixDecrement:  return "| [--Unary]:\n%*c";
 		case UnaryType::PostfixIncrement: return "| [Unary++]:\n%*c";
 		case UnaryType::PostfixDecrement: return "| [Unary--]:\n%*c";
+
+		case UnaryType::AddressOf: return "| [&Unary]:\n%*c";
+		case UnaryType::Deref:     return "| [*Unary]:\n%*c";
 		}
 
 		return "<???>";
@@ -133,6 +138,7 @@ enum class BinaryType
 	Subtract,
 	Multiply,
 	Divide,
+	Assign,
 	Equal,
 	Less,
 	LessEqual,
@@ -154,6 +160,7 @@ struct Binary : public Expression
 		case BinaryType::Subtract:     return "Subtract";
 		case BinaryType::Multiply:     return "Multiply";
 		case BinaryType::Divide:       return "Divide";
+		case BinaryType::Assign:        return "Assign";
 		case BinaryType::Equal:        return "Equal";
 		case BinaryType::Less:         return "Less";
 		case BinaryType::LessEqual:    return "LessEqual";
@@ -288,9 +295,9 @@ struct FunctionDefinition : public Expression
 struct VariableDefinition : public Statement
 {
 	std::unique_ptr<Expression> initializer;
-	int scope = -1;
+	Type type = (Type)0;
 	std::string name;
-	Type type;
+	int scope = -1;
 
 	std::string ToString(int& indent) override
 	{

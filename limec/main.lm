@@ -1,14 +1,5 @@
-sum :: (int a, int b) -> int
-{
-	return a + b;
-}
-sum :: (float a, float b) -> float
-{
-	return a + b;
-}
-
 main :: ()
 {
-	int c1 = sum(5, 10);
-	float c2 = sum(4.21, 6.92);
+	int c1 = 5;
+	c1 = 0;
 }

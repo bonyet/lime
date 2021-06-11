@@ -60,9 +60,9 @@ static void IncreaseScope()
 }
 static int NumScopes() { return (int)scopes.size();  }
 
-static void RegisterVariable(const std::string& name, Type varType)
+static void RegisterVariable(const std::string& name, Type varType, bool global)
 {
-	parser->scope->namedVariableTypes[name] = varType;
+	parser->scope->namedVariableTypes[name] = { varType, global };
 }
 static bool VariableExistsInScope(const std::string& name, Scope* scope = nullptr)
 {
@@ -74,9 +74,9 @@ static bool VariableExistsInScope(const std::string& name, Scope* scope = nullpt
 static Type GetVariableType(const std::string& name, Scope* scope = nullptr)
 {
 	if (scope)
-		return scope->namedVariableTypes[name];
+		return scope->namedVariableTypes[name].type;
 
-	return parser->scope->namedVariableTypes[name];
+	return parser->scope->namedVariableTypes[name].type;
 }
 
 template<typename... Args>
@@ -98,6 +98,11 @@ static void ResetState()
 	parser->state = oldState;
 }
 
+static bool IsArithmetic(Type type)
+{
+	return type == Type::Int || type == Type::Float;
+}
+
 static BinaryType GetBinaryType(TokenType type)
 {
 	switch (type)
@@ -111,6 +116,7 @@ static BinaryType GetBinaryType(TokenType type)
 	case TokenType::ForwardSlashEqual:
 	case TokenType::ForwardSlash: return BinaryType::Divide;
 
+	case TokenType::Equal: return BinaryType::Assign;
 	case TokenType::DoubleEqual: return BinaryType::Equal;
 	case TokenType::Less: return BinaryType::Less;
 	case TokenType::LessEqual: return BinaryType::LessEqual;
@@ -135,6 +141,7 @@ static int GetBinaryPriority(BinaryType type)
 	case BinaryType::Greater:
 	case BinaryType::GreaterEqual:
 		return 20;
+	case BinaryType::Assign:
 	case BinaryType::Equal:
 		return 19;
 	}
@@ -154,6 +161,34 @@ static unique_ptr<Expression> ParseExpression(int priority)
 {
 	unique_ptr<Expression> left = ParseUnaryExpression();
 
+	while (1)
+	{
+		Token token = parser->current;
+
+		BinaryType type = GetBinaryType(token.type);
+		int newPriority = GetBinaryPriority(type);
+
+		if (newPriority == 0 || newPriority <= priority) {
+			return left;
+		}
+
+		Advance();  // Through operator
+
+		unique_ptr<Binary> binary = make_unique<Binary>();
+		binary->binaryType = type;
+		binary->type = left->type; // The type of the binary expression is the type of the left operand
+
+		binary->operatorToken = token;
+		binary->left = std::move(left);
+		binary->right = ParseExpression(newPriority);
+
+		left = std::move(binary);
+	}
+}
+
+// Parses the rest of an expression given the left operand
+static unique_ptr<Expression> ParseExpressionFromLeft(unique_ptr<Expression> left, int priority)
+{
 	while (1)
 	{
 		Token token = parser->current;
@@ -359,7 +394,7 @@ static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 	// Find name
 	function->name = std::string(current->start, current->length);
 	function->type = Type::Void; // By default, functions return void
-	function->scopeIndex = NumScopes();
+	function->scopeIndex = parser->scopeDepth;
 
 	DeepenScope();
 
@@ -378,7 +413,7 @@ static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 		function->params.push_back(param);
 
 		// Register to scope
-		RegisterVariable(param.name, param.type);
+		RegisterVariable(param.name, param.type, false);
 
 		Advance();
 		if (current->type != TokenType::RightParen)
@@ -471,6 +506,13 @@ static unique_ptr<Expression> ParseVariableExpression()
 
 	Advance(); // Through identifier
 
+	if (IsArithmetic(variable->type))
+	{
+		auto expression = ParseExpressionFromLeft(std::move(variable), -1);
+		Expect(TokenType::Semicolon, "Expected ';' after expression");
+		return expression;
+	}
+	
 	return variable;
 }
 
@@ -504,7 +546,7 @@ static unique_ptr<Statement> ParseVariableDeclarationStatement()
 	variable->scope = parser->scopeDepth;
 	variable->name = std::string(nameToken.start, nameToken.length);
 	variable->type = TypeFromString(typeToken.start);
-	RegisterVariable(variable->name, variable->type);
+	RegisterVariable(variable->name, variable->type, parser->scopeDepth == 0);
 
 	// No initializer
 	if (parser->current.type == TokenType::Semicolon)
@@ -637,6 +679,7 @@ ParseResult Parser::Parse(Lexer* lexer)
 {
 	parser = this;
 	parser->lexer = lexer;
+	parser->scope = &scopes[0];
 
 	Advance(); // Lex the first token
 

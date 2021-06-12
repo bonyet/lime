@@ -281,43 +281,20 @@ static void ProcessToken(Token* token)
 		}
 		break;
 	}
+	case 'b':
+	{
+		if (CheckKeyword("bool", 4))
+		{
+			*token = MakeToken(TokenType::Bool, 4);
+			return;
+		}
+		break;
+	}
 	case 'e':
 	{
 		if (CheckKeyword("else", 4))
 		{
 			*token = MakeToken(TokenType::Else, 4);
-			return;
-		}
-		break;
-	}
-	case 'i':
-	{
-		if (CheckKeyword("int", 3))
-		{
-			*token = MakeToken(TokenType::Int, 3);
-			return;
-		}
-		if (CheckKeyword("if", 2))
-		{
-			*token = MakeToken(TokenType::If, 2);
-			return;
-		}
-		break;
-	}
-	case 'o':
-	{
-		if (CheckKeyword("or", 2))
-		{
-			*token = MakeToken(TokenType::Or, 2);
-			return;
-		}
-		break;
-	}
-	case 't':
-	{
-		if (CheckKeyword("true", 4))
-		{
-			*token = MakeToken(TokenType::True, 4);
 			return;
 		}
 		break;
@@ -336,11 +313,34 @@ static void ProcessToken(Token* token)
 		}
 		break;
 	}
-	case 'b':
+	case 'i':
 	{
-		if (CheckKeyword("bool", 4))
+		if (CheckKeyword("int", 3))
 		{
-			*token = MakeToken(TokenType::Bool, 4);
+			*token = MakeToken(TokenType::Int, 3);
+			return;
+		}
+		if (CheckKeyword("if", 2))
+		{
+			*token = MakeToken(TokenType::If, 2);
+			return;
+		}
+		break;
+	}
+	case 'm':
+	{
+		if (CheckKeyword("mut", 3))
+		{
+			*token = MakeToken(TokenType::Mut, 3);
+			return;
+		}
+		break;
+	}
+	case 'o':
+	{
+		if (CheckKeyword("or", 2))
+		{
+			*token = MakeToken(TokenType::Or, 2);
 			return;
 		}
 		break;
@@ -350,6 +350,15 @@ static void ProcessToken(Token* token)
 		if (CheckKeyword("return", 6))
 		{
 			*token = MakeToken(TokenType::Return, 6);
+			return;
+		}
+		break;
+	}
+	case 't':
+	{
+		if (CheckKeyword("true", 4))
+		{
+			*token = MakeToken(TokenType::True, 4);
 			return;
 		}
 		break;

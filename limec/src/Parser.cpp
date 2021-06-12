@@ -60,9 +60,9 @@ static void IncreaseScope()
 }
 static int NumScopes() { return (int)scopes.size();  }
 
-static void RegisterVariable(const std::string& name, Type varType, bool global)
+static void RegisterVariable(const std::string& name, Type varType, VariableFlags flags)
 {
-	parser->scope->namedVariableTypes[name] = { varType, global };
+	parser->scope->namedVariableTypes[name] = { varType, flags };
 }
 static bool VariableExistsInScope(const std::string& name, Scope* scope = nullptr)
 {
@@ -107,20 +107,20 @@ static BinaryType GetBinaryType(TokenType type)
 {
 	switch (type)
 	{
-	case TokenType::PlusEqual:
-	case TokenType::Plus: return BinaryType::Add;
-	case TokenType::DashEqual:
-	case TokenType::Dash: return BinaryType::Subtract;
-	case TokenType::StarEqual:
-	case TokenType::Star: return BinaryType::Multiply;
-	case TokenType::ForwardSlashEqual:
-	case TokenType::ForwardSlash: return BinaryType::Divide;
+	case TokenType::PlusEqual: return BinaryType::CompoundAdd;
+	case TokenType::Plus:      return BinaryType::Add;
+	case TokenType::DashEqual: return BinaryType::CompoundSub;
+	case TokenType::Dash:      return BinaryType::Subtract;
+	case TokenType::StarEqual: return BinaryType::CompoundMul;
+	case TokenType::Star:      return BinaryType::Multiply;
+	case TokenType::ForwardSlashEqual: return BinaryType::CompoundDiv;
+	case TokenType::ForwardSlash:      return BinaryType::Divide;
 
-	case TokenType::Equal: return BinaryType::Assign;
-	case TokenType::DoubleEqual: return BinaryType::Equal;
-	case TokenType::Less: return BinaryType::Less;
-	case TokenType::LessEqual: return BinaryType::LessEqual;
-	case TokenType::Greater: return BinaryType::Greater;
+	case TokenType::Equal:        return BinaryType::Assign;
+	case TokenType::DoubleEqual:  return BinaryType::Equal;
+	case TokenType::Less:         return BinaryType::Less;
+	case TokenType::LessEqual:    return BinaryType::LessEqual;
+	case TokenType::Greater:      return BinaryType::Greater;
 	case TokenType::GreaterEqual: return BinaryType::GreaterEqual;
 	}
 
@@ -413,7 +413,7 @@ static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 		function->params.push_back(param);
 
 		// Register to scope
-		RegisterVariable(param.name, param.type, false);
+		RegisterVariable(param.name, param.type, VariableFlags_None);
 
 		Advance();
 		if (current->type != TokenType::RightParen)
@@ -506,13 +506,6 @@ static unique_ptr<Expression> ParseVariableExpression()
 
 	Advance(); // Through identifier
 
-	if (IsArithmetic(variable->type))
-	{
-		auto expression = ParseExpressionFromLeft(std::move(variable), -1);
-		Expect(TokenType::Semicolon, "Expected ';' after expression");
-		return expression;
-	}
-	
 	return variable;
 }
 
@@ -536,8 +529,18 @@ static unique_ptr<Expression> ParseIdentifierExpression()
 
 static unique_ptr<Statement> ParseVariableDeclarationStatement()
 {
+	VariableFlags flags = VariableFlags_Immutable; // Immutable by default
+
 	// We start at the type (`int`, `float`, etc)
-	Token typeToken = parser->current;
+	Token startToken = parser->current;
+	if (startToken.type == TokenType::Mut)
+	{
+		flags |= VariableFlags_Mutable;
+		startToken = Advance(); // To type
+	}
+	if (parser->scopeDepth == 0)
+		flags |= VariableFlags_Global;
+
 	Token nameToken = Advance();
 
 	Advance(); // Through name
@@ -545,8 +548,10 @@ static unique_ptr<Statement> ParseVariableDeclarationStatement()
 	auto variable = make_unique<VariableDefinition>();
 	variable->scope = parser->scopeDepth;
 	variable->name = std::string(nameToken.start, nameToken.length);
-	variable->type = TypeFromString(typeToken.start);
-	RegisterVariable(variable->name, variable->type, parser->scopeDepth == 0);
+	variable->type = TypeFromString(startToken.start);
+	variable->flags = flags;
+
+	RegisterVariable(variable->name, variable->type, variable->flags);
 
 	// No initializer
 	if (parser->current.type == TokenType::Semicolon)
@@ -630,6 +635,7 @@ static unique_ptr<Statement> ParseStatement()
 	case TokenType::Int:
 	case TokenType::Float:
 	case TokenType::Bool:
+	case TokenType::Mut:
 		return ParseVariableDeclarationStatement();
 	case TokenType::ID:
 		return ParseIdentifierExpression();

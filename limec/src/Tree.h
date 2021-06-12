@@ -13,7 +13,7 @@ struct Statement
 	virtual ~Statement() {}
 	virtual std::string ToString(int& indent) { return "| [Statement]\n"; }
 
-	virtual void* Generate() { return nullptr; }
+	virtual llvm::Value* Generate() { return nullptr; }
 };
 
 // Block of statements
@@ -79,7 +79,7 @@ struct PrimaryValue : public Primary
 		return base;
 	}
 
-	void* Generate() override;
+	llvm::Value* Generate() override;
 };
 
 struct PrimaryString : public Primary
@@ -134,10 +134,10 @@ struct Unary : public Expression
 
 enum class BinaryType
 {
-	Add = 1,
-	Subtract,
-	Multiply,
-	Divide,
+	Add = 1,  CompoundAdd,
+	Subtract, CompoundSub,
+	Multiply, CompoundMul,
+	Divide,   CompoundDiv,
 	Assign,
 	Equal,
 	Less,
@@ -182,7 +182,7 @@ struct Binary : public Expression
 		return result;
 	}
 
-	void* Generate() override;
+	llvm::Value* Generate() override;
 };
 
 struct Branch : public Statement
@@ -200,7 +200,7 @@ struct Branch : public Statement
 		return base;
 	}
 
-	void* Generate() override;
+	llvm::Value* Generate() override;
 };
 
 struct Call : public Expression
@@ -220,7 +220,7 @@ struct Call : public Expression
 		return base;
 	}
 
-	void* Generate() override;
+	llvm::Value* Generate() override;
 };
 
 struct Return : public Expression
@@ -238,7 +238,7 @@ struct Return : public Expression
 		return base;
 	}
 
-	void* Generate() override { return expression->Generate(); }
+	llvm::Value* Generate() override { return expression->Generate(); }
 };
 
 // Yes, function declarations don't technically express anything, but this just inherits from Expression anyways
@@ -289,12 +289,30 @@ struct FunctionDefinition : public Expression
 		return base;
 	}
 
-	void* Generate() override;
+	llvm::Value* Generate() override;
 };
+
+enum VariableFlags : int
+{
+	VariableFlags_None      = 0,
+	VariableFlags_Immutable = 1 << 0,
+	VariableFlags_Mutable   = 1 << 1,
+	VariableFlags_Global    = 1 << 2,
+};
+
+inline VariableFlags operator|(VariableFlags a, VariableFlags b)
+{
+	return (VariableFlags)((int)a | (int)b);
+}
+inline VariableFlags operator|=(VariableFlags& a, VariableFlags b)
+{
+	return (a = (VariableFlags)((int)a | (int)b));
+}
 
 struct VariableDefinition : public Statement
 {
 	std::unique_ptr<Expression> initializer;
+	VariableFlags flags;
 	Type type = (Type)0;
 	std::string name;
 	int scope = -1;
@@ -304,7 +322,7 @@ struct VariableDefinition : public Statement
 		return FormatString("| [VariableDef]: %s\n", name.c_str());
 	}
 
-	void* Generate() override;
+	llvm::Value* Generate() override;
 };
 
 struct Variable : public Expression
@@ -313,8 +331,8 @@ struct Variable : public Expression
 
 	std::string ToString(int& indent) override
 	{
-		return FormatString("| [IDRead]: %s\n", name.c_str());
+		return FormatString("| [VarAccess]: %s\n", name.c_str());
 	}
 
-	void* Generate() override;
+	llvm::Value* Generate() override;
 };

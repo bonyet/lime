@@ -24,9 +24,8 @@ enum class TokenType : uint16_t
 	// Keywords
 	And, Or, If, Else,
 	True, False,
-	// Primitive type keywords, TODO: add more!
 	Int, Float, Bool,
-	Return,
+	Return, Mut,
 
 	// Misc
 	Ampersand, Pipe, Percent, At, Hashtag, ID, 

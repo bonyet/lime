@@ -3,11 +3,10 @@
 struct ScopedValue
 {
 	Type type;
-	bool global;
+	VariableFlags flags;
 };
 
 struct Scope
 {
 	std::unordered_map<std::string, ScopedValue> namedVariableTypes;
-	//std::vector<Scope> childrenScopes;
 };

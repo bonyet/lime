@@ -14,8 +14,15 @@ static std::unique_ptr<llvm::IRBuilder<>> builder;
 static std::unique_ptr<llvm::Module> module;
 static llvm::Function* currentFunction = nullptr;
 
-static std::unordered_map<std::string, llvm::Value*> namedGlobals;
-static std::unordered_map<std::string, llvm::Value*> namedValues;
+#define Assert(cond, msg) { if (!(cond)) { throw CompileError(msg); } }
+
+struct NamedValue
+{
+	llvm::Value* raw = nullptr;
+	VariableFlags flags = VariableFlags_None;
+};
+
+static std::unordered_map<std::string, NamedValue> namedValues;
 
 // Utils
 static llvm::Type* GetLLVMType(Type type)
@@ -35,7 +42,7 @@ static llvm::Type* GetLLVMType(Type type)
 	throw CompileError("Unknown type");
 }
 
-void* PrimaryValue::Generate()
+llvm::Value* PrimaryValue::Generate()
 {
 	switch (type)
 	{
@@ -48,10 +55,24 @@ void* PrimaryValue::Generate()
 	}
 }
 
-void* VariableDefinition::Generate()
+static void ResetStackValues()
+{
+	for (auto it = namedValues.begin(); it != namedValues.end(); )
+	{
+		if (!(it->second.flags & VariableFlags_Global))
+		{
+			namedValues.erase(it++);
+			continue;
+		}
+
+		++it;
+	}
+}
+
+llvm::Value* VariableDefinition::Generate()
 {
 	using namespace llvm;
-
+	
 	llvm::Type* type = GetLLVMType(this->type);
 	if (scope == 0)
 	{
@@ -63,14 +84,14 @@ void* VariableDefinition::Generate()
 		if (initializer)
 			gVar->setInitializer((Constant*)initializer->Generate());
 
-		namedGlobals[name] = gVar;
+		namedValues[name] = { gVar, flags };
 
 		return gVar;
 	}
 
 	// Allocate on the stack
 	AllocaInst* allocaInst = builder->CreateAlloca(type, nullptr, name);
-	namedValues[name] = allocaInst;
+	namedValues[name] = { allocaInst, flags };
 
 	if (initializer)
 	{
@@ -81,124 +102,151 @@ void* VariableDefinition::Generate()
 	return allocaInst;
 }
 
-void* Variable::Generate()
+llvm::Value* Variable::Generate()
 {
 	using namespace llvm;
 
 	// Load global or local variable
 	// TODO: enforce shadowing rules
-	Value* value = nullptr;
-	if (value = namedGlobals[name])
-		return builder->CreateLoad(value, "loadtmp");
-	else if (Value* value = namedValues[name])
-		return builder->CreateLoad(value, "loadtmp");
 
-	throw CompileError("Unknown variable '%s'", name.c_str());
+	if (!namedValues.count(name))
+		throw CompileError("Unknown variable '%s'", name.c_str());
+
+	NamedValue& value = namedValues[name];
+	value.raw = (value.flags & VariableFlags_Global) 
+		? builder->CreateLoad(value.raw, "loadtmp") : builder->CreateLoad(value.raw, "loadtmp");
+
+	return value.raw;
 }
 
-void* Binary::Generate()
+static llvm::Value* CreateBinOp(llvm::Value* left, llvm::Value* right, 
+	BinaryType type, Type lType, VariableFlags lFlags)
 {
-	llvm::Value* lhs = (llvm::Value*)left->Generate();
-	llvm::Value* rhs = (llvm::Value*)right->Generate();
+	switch (type)
+	{
+	case BinaryType::CompoundAdd:
+		Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
+	case BinaryType::Add:
+	{
+		if (lType == Type::Int)
+			return builder->CreateAdd(left, right, "addtmp");
+		if (lType == Type::Float)
+			return builder->CreateFAdd(left, right, "addtmp");
+		break;
+	}
+	case BinaryType::CompoundSub:
+		Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
+	case BinaryType::Subtract:
+	{
+		if (lType == Type::Int)
+			return builder->CreateSub(left, right, "subtmp");
+		if (lType == Type::Float)
+			return builder->CreateFSub(left, right, "subtmp");
+		break;
+	}
+	case BinaryType::CompoundMul:
+		Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
+	case BinaryType::Multiply:
+	{
+		if (lType == Type::Int)
+			return builder->CreateMul(left, right, "multmp");
+		if (lType == Type::Float)
+			return builder->CreateFMul(left, right, "multmp");
+		break;
+	}
+	case BinaryType::CompoundDiv:
+		Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
+	case BinaryType::Divide:
+	{
+		if (lType == Type::Int)
+			throw CompileError("Integer division not supported");
+		if (lType == Type::Float)
+			return builder->CreateFDiv(left, right, "divtmp");
+		break;
+	}
+	case BinaryType::Assign:
+	{
+		Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
 
-	if (!lhs || !rhs)
-		throw CompileError("Invalid binary operator"); // What happon
+		// TODO: mutable variables
+		if (lFlags & VariableFlags_Mutable)
+			return builder->CreateStore(right, left);
+	}
+	case BinaryType::Equal:
+	{
+		if (lType == Type::Int)
+			return builder->CreateICmpEQ(left, right, "cmptmp");
+		if (lType == Type::Float)
+			return builder->CreateFCmpUEQ(left, right, "cmptmp");
+		break;
+	}
+	case BinaryType::Less:
+	{
+		if (lType == Type::Int)
+			return builder->CreateICmpULT(left, right, "cmptmp");
+		if (lType == Type::Float)
+			return builder->CreateFCmpULT(left, right, "cmptmp");
+		break;
+	}
+	case BinaryType::LessEqual:
+	{
+		if (lType == Type::Int)
+			return builder->CreateICmpULE(left, right, "cmptmp");
+		if (lType == Type::Float)
+			return builder->CreateFCmpULE(left, right, "cmptmp");
+		break;
+	}
+	case BinaryType::Greater:
+	{
+		if (lType == Type::Int)
+			return builder->CreateICmpUGT(left, right, "cmptmp");
+		if (lType == Type::Float)
+			return builder->CreateFCmpUGT(left, right, "cmptmp");
+		break;
+	}
+	case BinaryType::GreaterEqual:
+	{
+		if (lType == Type::Int)
+			return builder->CreateICmpUGE(left, right, "cmptmp");
+		if (lType == Type::Float)
+			return builder->CreateFCmpUGE(left, right, "cmptmp");
+		break;
+	}
+	}
 
-	// TODO: correct types for variables
+	return nullptr;
+}
+
+llvm::Value* Binary::Generate()
+{
+	llvm::Value* lhs = left->Generate();
+	llvm::Value* rhs = right->Generate();
+
+	VariableFlags flags = VariableFlags_None;
+
+	// Handle flags
+	if (namedValues.count(lhs->getName().str()))
+		flags = namedValues[lhs->getName().str()].flags;
+
+	if (!left || !right)
+		throw CompileError("Invalid binary operator '%.*s'", operatorToken.length, operatorToken.start); // What happon
+
 	if (right->type != left->type)
 		throw CompileError("Both operands of a binary operation must be of the same type");
 
 	if (right->type == (Type)0 || left->type == (Type)0)
 		throw CompileError("Invalid operands for binary operation");
 
-	Type opType = left->type;
+	Type lType = left->type;
 	
-	// please find me a better way of doing this
-	switch (binaryType)
-	{
-	case BinaryType::Add:
-	{
-		if (opType == Type::Int)
-			return builder->CreateAdd(lhs, rhs, "addtmp");
-		if (opType == Type::Float)
-			return builder->CreateFAdd(lhs, rhs, "addtmp");
-		break;
-	}
-	case BinaryType::Subtract:
-	{
-		if (opType == Type::Int)
-			return builder->CreateSub(lhs, rhs, "subtmp");
-		if (opType == Type::Float)
-			return builder->CreateFSub(lhs, rhs, "subtmp");
-		break;
-	}
-	case BinaryType::Multiply:
-	{
-		if (opType == Type::Int)
-			return builder->CreateMul(lhs, rhs, "multmp");
-		if (opType == Type::Float)
-			return builder->CreateFMul(lhs, rhs, "multmp");
-		break;
-	}
-	case BinaryType::Divide:
-	{
-		if (opType == Type::Int)
-			throw CompileError("Integer division not supported");
-		if (opType == Type::Float)
-			return builder->CreateFDiv(lhs, rhs, "divtmp");
-		break;
-	}
-	case BinaryType::Assign:
-	{
-		// TODO: mutable variables
-		break;
-	}
-	case BinaryType::Equal:
-	{
-		if (opType == Type::Int)
-			return builder->CreateICmpEQ(lhs, rhs, "cmptmp");
-		if (opType == Type::Float)
-			return builder->CreateFCmpUEQ(lhs, rhs, "cmptmp");
-		break;
-	}
-	case BinaryType::Less:
-	{
-		if (opType == Type::Int)
-			return builder->CreateICmpULT(lhs, rhs, "cmptmp");
-		if (opType == Type::Float)
-			return builder->CreateFCmpULT(lhs, rhs, "cmptmp");
-		break;
-	}
-	case BinaryType::LessEqual:
-	{
-		if (opType == Type::Int)
-			return builder->CreateICmpULE(lhs, rhs, "cmptmp");
-		if (opType == Type::Float)
-			return builder->CreateFCmpULE(lhs, rhs, "cmptmp");
-		break;
-	}
-	case BinaryType::Greater:
-	{
-		if (opType == Type::Int)
-			return builder->CreateICmpUGT(lhs, rhs, "cmptmp");
-		if (opType == Type::Float)
-			return builder->CreateFCmpUGT(lhs, rhs, "cmptmp");
-		break;
-	}
-	case BinaryType::GreaterEqual:
-	{
-		if (opType == Type::Int)
-			return builder->CreateICmpUGE(lhs, rhs, "cmptmp");
-		if (opType == Type::Float)
-			return builder->CreateFCmpUGE(lhs, rhs, "cmptmp");
-		break;
-	}
-	default:
-		throw CompileError("Invalid binary operator");
-	}
+	llvm::Value* value = CreateBinOp(lhs, rhs, binaryType, lType, flags);
+	if (!value)
+		throw CompileError("Invalid binary operator '%.*s'", operatorToken.length, operatorToken.start);
+
+	return value;
 }
 
-void* Branch::Generate()
+llvm::Value* Branch::Generate()
 {
 	using namespace llvm;
 
@@ -260,7 +308,7 @@ static void MangleFunctionName(std::string& name, const std::vector<FunctionDefi
 		name += LLVMTypeStringFromType(param.type);
 }
 
-void* Call::Generate()
+llvm::Value* Call::Generate()
 {
 	// Mangle the function call name
 	for (auto& arg : args)
@@ -308,11 +356,11 @@ static void GenerateEntryBlockAllocas(llvm::Function* function)
 		name.pop_back(); // Remove arg suffix
 
 		AllocaInst* allocaInst = builder->CreateAlloca(type, nullptr, name);
-		namedValues[name] = allocaInst;
+		namedValues[name] = { allocaInst, VariableFlags_None };
 	}
 }
 
-void* FunctionDefinition::Generate()
+llvm::Value* FunctionDefinition::Generate()
 {
 	MangleFunctionName(name, params);
 

@@ -3,8 +3,12 @@ sum :: (int a, int b) -> int
 	return a + b;
 }
 
-main :: () -> int
+main :: ()
 {
 	mut int result = sum(5, 15);
-	return result;
+	
+	result = 5;
+	result = 10 * 1002;
+
+	int i = result + 1;
 }

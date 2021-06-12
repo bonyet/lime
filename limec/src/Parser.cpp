@@ -354,27 +354,6 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 		}
 	}
 
-	//switch (parser->state)
-	//{
-	//case Parser::State::VariableInitializer:
-	//{
-	//	// TODO: fix this shit? why is this here i dont remember
-
-	//	// Identifiers can be used as primary expressions such as:
-	//	// int b = 1;
-	//	// int a = b; <- b is a variable
-	//	// So we have to handle the special case here
-	//	if (token.type == TokenType::ID)
-	//	{
-	//		auto expression = make_unique<Variable>();
-	//		expression->name.Copy(token.start, token.length);
-	//		return expression;
-	//	}
-
-	//	throw LimeError("Expected an expression after variable declaration");
-	//}
-	//default:
-	//}
 	throw LimeError("Invalid token for primary expression: %.*s", token.length, token.start);
 }
 
@@ -503,6 +482,14 @@ static unique_ptr<Expression> ParseVariableExpression()
 	auto variable = make_unique<Variable>();
 	variable->name = std::string(current->start, current->length);
 	variable->type = GetVariableType(variable->name);
+
+	BinaryType type = (BinaryType)0;
+	if ((type = GetBinaryType(parser->lexer->nextToken.type)) != (BinaryType)0)
+	{
+		// We are using this variable in a binary operation
+		Advance();
+		return ParseExpression(-1);
+	}
 
 	Advance(); // Through identifier
 

@@ -403,8 +403,12 @@ Token Lexer::Next()
 	// We don't want the lexer to *actually* advance when we process the next token
 	// so instead I use this little hack to revert current to what it was before
 	const char* oldCurrent = current;
+	int oldLine = line;
+
 	ProcessToken(&nextToken);
+	
 	current = oldCurrent;
+	line = oldLine;
 
 	return currentToken;
 }

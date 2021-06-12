@@ -1,14 +1,10 @@
-sum :: (int a, int b) -> int
-{
-	return a + b;
-}
+// mut int i = 0;
+// i = 100 * 2;
 
 main :: ()
 {
-	mut int result = sum(5, 15);
-	
-	result = 5;
-	result = 10 * 1002;
-
-	int i = result + 1;
+	mut int i = 0;
+	i = 5;
+	i = 10 * 69;
+	i = i;
 }

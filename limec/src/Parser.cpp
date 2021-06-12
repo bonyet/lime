@@ -154,8 +154,8 @@ static unique_ptr<Statement>  ParseStatement();
 static unique_ptr<Expression> ParseUnaryExpression();
 static unique_ptr<Statement>  ParseCompoundStatement();
 static unique_ptr<Expression> ParsePrimaryExpression();
-static unique_ptr<Expression> ParseVariableExpression();
-static unique_ptr<Expression> ParseIdentifierExpression();
+static unique_ptr<Statement>  ParseVariableExpressionStatement();
+static unique_ptr<Statement>  ParseIdentifierExpressionStatement();
 
 static unique_ptr<Expression> ParseExpression(int priority) 
 {
@@ -297,10 +297,6 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 		{
 			Advance();
 			return ParseReturnStatement();
-		}
-		case TokenType::ID:
-		{
-			return ParseIdentifierExpression();
 		}
 		case TokenType::True:
 		{
@@ -475,11 +471,11 @@ static unique_ptr<Call> ParseFunctionCall()
 	return call;
 }
 
-static unique_ptr<Expression> ParseVariableExpression()
+static unique_ptr<Statement> ParseVariableExpressionStatement()
 {
 	Token* current = &parser->current;
 
-	auto variable = make_unique<Variable>();
+	auto variable = make_unique<VariableAccess>();
 	variable->name = std::string(current->start, current->length);
 	variable->type = GetVariableType(variable->name);
 
@@ -487,16 +483,19 @@ static unique_ptr<Expression> ParseVariableExpression()
 	if ((type = GetBinaryType(parser->lexer->nextToken.type)) != (BinaryType)0)
 	{
 		// We are using this variable in a binary operation
-		Advance();
-		return ParseExpression(-1);
+		Advance(); // To operator
+		Advance(); // Through operator
+		variable->assignor = ParseExpression(-1);
+		Expect(TokenType::Semicolon, "Expected ';' after expression");
 	}
-
-	Advance(); // Through identifier
+	else {
+		Advance(); // Through identifier
+	}
 
 	return variable;
 }
 
-static unique_ptr<Expression> ParseIdentifierExpression()
+static unique_ptr<Statement> ParseIdentifierExpressionStatement()
 {
 	Token* current = &parser->current; // At identifier
 
@@ -508,7 +507,7 @@ static unique_ptr<Expression> ParseIdentifierExpression()
 	case TokenType::LeftParen:
 		return ParseFunctionCall();
 	default:
-		return ParseVariableExpression();
+		return ParseVariableExpressionStatement(); // Accessing id
 	}
 
 	throw LimeError("Invalid identifier expression '%.*s'", next->length, next->start);
@@ -522,9 +521,10 @@ static unique_ptr<Statement> ParseVariableDeclarationStatement()
 	Token startToken = parser->current;
 	if (startToken.type == TokenType::Mut)
 	{
-		flags |= VariableFlags_Mutable;
+		flags = VariableFlags_Mutable;
 		startToken = Advance(); // To type
 	}
+
 	if (parser->scopeDepth == 0)
 		flags |= VariableFlags_Global;
 
@@ -625,7 +625,7 @@ static unique_ptr<Statement> ParseStatement()
 	case TokenType::Mut:
 		return ParseVariableDeclarationStatement();
 	case TokenType::ID:
-		return ParseIdentifierExpression();
+		return ParseIdentifierExpressionStatement();
 	case TokenType::If:
 		return ParseBranchStatement();
 	}

@@ -325,9 +325,10 @@ struct VariableDefinition : public Statement
 	llvm::Value* Generate() override;
 };
 
-struct Variable : public Expression
+struct VariableAccess : public Expression
 {
 	std::string name;
+	std::unique_ptr<Expression> assignor = nullptr;
 
 	std::string ToString(int& indent) override
 	{

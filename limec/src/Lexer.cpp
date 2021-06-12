@@ -47,10 +47,7 @@ static void SkipWhitespace()
 	if (lexer->current[0] == '/' && lexer->current[1] == '/')
 	{
 		while (*lexer->current != '\n' && *lexer->current != '\0')
-		{
 			Advance(1);
-		}
-		lexer->line++;
 	}
 
 	while (IsWhitespace(*lexer->current))

@@ -102,7 +102,7 @@ llvm::Value* VariableDefinition::Generate()
 	return allocaInst;
 }
 
-llvm::Value* Variable::Generate()
+llvm::Value* VariableAccess::Generate()
 {
 	using namespace llvm;
 
@@ -113,10 +113,19 @@ llvm::Value* Variable::Generate()
 		throw CompileError("Unknown variable '%s'", name.c_str());
 
 	NamedValue& value = namedValues[name];
-	value.raw = (value.flags & VariableFlags_Global) 
-		? builder->CreateLoad(value.raw, "loadtmp") : builder->CreateLoad(value.raw, "loadtmp");
 
-	return value.raw;
+	if (!assignor)
+	{
+		return builder->CreateLoad(value.raw, "loadtmp");
+	}
+	else
+	{
+		if (value.flags & VariableFlags_Immutable)
+			throw CompileError("Cannot assign to an immutable entity");
+
+		Value* assignedValue = assignor->Generate();
+		return builder->CreateStore(assignedValue, value.raw);
+	}
 }
 
 static llvm::Value* CreateBinOp(llvm::Value* left, llvm::Value* right, 

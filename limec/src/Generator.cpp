@@ -104,128 +104,108 @@ llvm::Value* VariableDefinition::Generate()
 	return allocaInst;
 }
 
-llvm::Value* VariableAccess::Generate()
+llvm::Value* VariableRead::Generate()
 {
 	using namespace llvm;
 
-	// Load global or local variable
 	// TODO: enforce shadowing rules
 
 	if (!namedValues.count(name))
 		throw CompileError("Unknown variable '%s'", name.c_str());
 
 	NamedValue& value = namedValues[name];
+	return builder->CreateLoad(value.raw, "loadtmp");
+}
 
-	if (!assignor)
-	{
-		return builder->CreateLoad(value.raw, "loadtmp");
-	}
-	else
-	{
-		if (value.flags & VariableFlags_Immutable)
-			throw CompileError("Cannot assign to an immutable entity");
+llvm::Value* VariableWrite::Generate()
+{
+	using namespace llvm;
 
-		Value* assignedValue = assignor->Generate();
-		return builder->CreateStore(assignedValue, value.raw);
-	}
+	// TODO: enforce shadowing rules
+
+	if (!namedValues.count(name))
+		throw CompileError("Unknown variable '%s'", name.c_str());
+
+	NamedValue& namedValue = namedValues[name];
+	
+	Value* value = right->Generate();
+	return builder->CreateStore(value, namedValue.raw, "storetmp");
 }
 
 static llvm::Value* CreateBinOp(llvm::Value* left, llvm::Value* right, 
-	BinaryType type, Type lType, VariableFlags lFlags)
+	BinaryType type, Type lType, VariableFlags lFlags, VariableFlags rFlags)
 {
+	using llvm::Instruction;
+
+	Instruction::BinaryOps instruction = (Instruction::BinaryOps)-1;
 	switch (type)
 	{
-	case BinaryType::CompoundAdd:
-		Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
-	case BinaryType::Add:
-	{
-		if (lType == Type::Int)
-			return builder->CreateAdd(left, right, "addtmp");
-		if (lType == Type::Float)
-			return builder->CreateFAdd(left, right, "addtmp");
-		break;
-	}
-	case BinaryType::CompoundSub:
-		Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
-	case BinaryType::Subtract:
-	{
-		if (lType == Type::Int)
-			return builder->CreateSub(left, right, "subtmp");
-		if (lType == Type::Float)
-			return builder->CreateFSub(left, right, "subtmp");
-		break;
-	}
-	case BinaryType::CompoundMul:
-		Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
-	case BinaryType::Multiply:
-	{
-		if (lType == Type::Int)
-			return builder->CreateMul(left, right, "multmp");
-		if (lType == Type::Float)
-			return builder->CreateFMul(left, right, "multmp");
-		break;
-	}
-	case BinaryType::CompoundDiv:
-		Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
-	case BinaryType::Divide:
-	{
-		if (lType == Type::Int)
-			throw CompileError("Integer division not supported");
-		if (lType == Type::Float)
-			return builder->CreateFDiv(left, right, "divtmp");
-		break;
-	}
-	case BinaryType::Assign:
-	{
-		Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
+		case BinaryType::CompoundAdd:
+			Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
+		case BinaryType::Add:
+		{
+			instruction = lType == Type::Int ? Instruction::Add : Instruction::FAdd;
+			break;
+		}
+		case BinaryType::CompoundSub:
+			Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
+		case BinaryType::Subtract:
+		{
+			instruction = lType == Type::Int ? Instruction::Sub : Instruction::FSub;
+			break;
+		}
+		case BinaryType::CompoundMul:
+			Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
+		case BinaryType::Multiply:
+		{
+			instruction = lType == Type::Int ? Instruction::Mul : Instruction::FMul;
+			break;
+		}
+		case BinaryType::CompoundDiv:
+			Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
+		case BinaryType::Divide:
+		{
+			if (lType == Type::Int)
+				throw CompileError("Integer division not supported");
+		
+			instruction = Instruction::FDiv;
+			break;
+		}
+		case BinaryType::Assign:
+		{
+			Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
 
-		// TODO: mutable variables
-		if (lFlags & VariableFlags_Mutable)
 			return builder->CreateStore(right, left);
-	}
-	case BinaryType::Equal:
-	{
-		if (lType == Type::Int)
-			return builder->CreateICmpEQ(left, right, "cmptmp");
-		if (lType == Type::Float)
-			return builder->CreateFCmpUEQ(left, right, "cmptmp");
-		break;
-	}
-	case BinaryType::Less:
-	{
-		if (lType == Type::Int)
-			return builder->CreateICmpULT(left, right, "cmptmp");
-		if (lType == Type::Float)
-			return builder->CreateFCmpULT(left, right, "cmptmp");
-		break;
-	}
-	case BinaryType::LessEqual:
-	{
-		if (lType == Type::Int)
-			return builder->CreateICmpULE(left, right, "cmptmp");
-		if (lType == Type::Float)
-			return builder->CreateFCmpULE(left, right, "cmptmp");
-		break;
-	}
-	case BinaryType::Greater:
-	{
-		if (lType == Type::Int)
-			return builder->CreateICmpUGT(left, right, "cmptmp");
-		if (lType == Type::Float)
-			return builder->CreateFCmpUGT(left, right, "cmptmp");
-		break;
-	}
-	case BinaryType::GreaterEqual:
-	{
-		if (lType == Type::Int)
-			return builder->CreateICmpUGE(left, right, "cmptmp");
-		if (lType == Type::Float)
-			return builder->CreateFCmpUGE(left, right, "cmptmp");
-		break;
-	}
+		}
+		case BinaryType::Equal:
+		{
+			return lType == Type::Int ? builder->CreateICmpEQ(left, right, "cmptmp") :
+				builder->CreateFCmpUEQ(left, right, "cmptmp");
+		}
+		case BinaryType::Less:
+		{
+			return lType == Type::Int ? builder->CreateICmpULT(left, right, "cmptmp") :
+				builder->CreateFCmpULT(left, right, "cmptmp");
+		}
+		case BinaryType::LessEqual:
+		{
+			return lType == Type::Int ? builder->CreateICmpULE(left, right, "cmptmp") :
+				builder->CreateFCmpULE(left, right, "cmptmp");
+		}
+		case BinaryType::Greater:
+		{
+			return lType == Type::Int ? builder->CreateICmpUGT(left, right, "cmptmp") :
+				builder->CreateFCmpUGT(left, right, "cmptmp");
+		}
+		case BinaryType::GreaterEqual:
+		{
+			return lType == Type::Int ? builder->CreateICmpUGE(left, right, "cmptmp") :
+				builder->CreateFCmpUGE(left, right, "cmptmp");
+		}
 	}
 
-	return nullptr;
+	Assert(instruction != (Instruction::BinaryOps)-1, "Invalid binary operator");
+	return builder->CreateBinOp(instruction, left, right);
 }
 
 llvm::Value* Binary::Generate()
@@ -233,11 +213,14 @@ llvm::Value* Binary::Generate()
 	llvm::Value* lhs = left->Generate();
 	llvm::Value* rhs = right->Generate();
 
-	VariableFlags flags = VariableFlags_None;
+	VariableFlags lFlags = VariableFlags_None, rFlags = VariableFlags_None;
 
 	// Handle flags
-	if (namedValues.count(lhs->getName().str()))
-		flags = namedValues[lhs->getName().str()].flags;
+	auto leftName = lhs->getName().str(), rightName = rhs->getName().str();
+	if (lhs->hasName() && namedValues.count(leftName))
+		lFlags = namedValues[lhs->getName().str()].flags;
+	if (rhs->hasName() && namedValues.count(rightName))
+		rFlags = namedValues[rhs->getName().str()].flags;
 
 	if (!left || !right)
 		throw CompileError("Invalid binary operator '%.*s'", operatorToken.length, operatorToken.start); // What happon
@@ -250,7 +233,7 @@ llvm::Value* Binary::Generate()
 
 	Type lType = left->type;
 	
-	llvm::Value* value = CreateBinOp(lhs, rhs, binaryType, lType, flags);
+	llvm::Value* value = CreateBinOp(lhs, rhs, binaryType, lType, lFlags, rFlags);
 	if (!value)
 		throw CompileError("Invalid binary operator '%.*s'", operatorToken.length, operatorToken.start);
 
@@ -347,7 +330,8 @@ llvm::Value* Call::Generate()
 		argValues.push_back(generated);
 	}
 
-	return builder->CreateCall(func, argValues, "calltmp");
+	llvm::CallInst* callInst = builder->CreateCall(func, argValues);
+	return callInst;
 }
 
 static void GenerateEntryBlockAllocas(llvm::Function* function)
@@ -432,6 +416,10 @@ llvm::Value* FunctionDefinition::Generate()
 
 	if (verifyFunction(*function, &llvm::errs()))
 	{
+		printf("\nIR so far:\n");
+		module->print(llvm::errs(), nullptr);
+		printf("\n");
+
 		function->eraseFromParent();
 		printf("\n");
 	}
@@ -460,5 +448,9 @@ void Generator::Generate(std::unique_ptr<Compound> compound)
 	catch (CompileError& err)
 	{
 		fprintf(stderr, "CodeGenError: %s\n\n", err.message.c_str());
+
+		printf("IR generated:\n");
+		module->print(llvm::errs(), nullptr);
+		printf("\n");
 	}
 }

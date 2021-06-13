@@ -1,10 +1,18 @@
-// mut int i = 0;
-// i = 100 * 2;
+// TODO:
+// References / pointers
+// Structures then classes
+// Multiple return values
+// Annotations / attributes
 
-main :: () -> int
+modify :: (int& val, int& val2)
 {
-	mut int i = 0;
-	i = i;
+	val = val + val2;
+}
 
-	return 69;
+main :: ()
+{
+	int a = 0;
+	int b = 69;
+	b = 12 * 5;
+	modify(a, b);
 }

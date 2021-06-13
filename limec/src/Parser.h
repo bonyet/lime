@@ -8,21 +8,34 @@ struct ParseResult
 	std::unique_ptr<Compound> module;
 };
 
+enum class ParseState : int
+{
+	Default      = 0 << 0,
+	Expression   = 1 << 0,
+	VariableInit = 1 << 1,
+	FuncCallArgs = 1 << 2,
+};
+
+inline int operator&(ParseState a, ParseState b)
+{
+	return (int)a & (int)b;
+}
+inline ParseState operator|(ParseState a, ParseState b)
+{
+	return (ParseState)((int)a | (int)b);
+}
+inline ParseState operator|=(ParseState& a, ParseState b)
+{
+	return (a = (ParseState)((int)a | (int)b));
+}
+
 struct Parser
 {
-	enum class State
-	{
-		Default,
-
-		VariableInitializer,
-		FunctionCallArgs,
-	};
-
 	ParseResult Parse(Lexer* lexer);
 
 	uint32_t scopeDepth = 0;
 
-	State state = State::Default;
+	ParseState state = ParseState::Default;
 	Token current;
 	Lexer* lexer = nullptr;
 	struct Scope* scope;

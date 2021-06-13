@@ -60,6 +60,7 @@ static void IncreaseScope()
 #endif
 	parser->scope = &scopes[--parser->scopeDepth];
 }
+
 static int NumScopes() { return (int)scopes.size();  }
 
 static void RegisterVariable(const std::string& name, Type varType, VariableFlags flags)
@@ -90,11 +91,21 @@ static void Expect(TokenType type, const char* errorMessageFmt, Args&&... args)
 	Advance();
 }
 
-static void SetState(Parser::State state)
+// TODO: better system for saving parse state
+static ParseState oldState = ParseState::Default;
+static void SetState(ParseState state)
 {
+	oldState = parser->state;
 	parser->state = state;
 }
-static Parser::State oldState = Parser::State::Default;
+static void SaveState()
+{
+	oldState = parser->state;
+}
+static void OrState(ParseState state)
+{
+	parser->state |= state;
+}
 static void ResetState()
 {
 	parser->state = oldState;
@@ -153,14 +164,19 @@ static int GetBinaryPriority(BinaryType type)
 
 // Forward declarations
 static unique_ptr<Statement>  ParseStatement();
+static unique_ptr<Expression> ParseFunctionCall();
 static unique_ptr<Expression> ParseUnaryExpression();
 static unique_ptr<Statement>  ParseCompoundStatement();
 static unique_ptr<Expression> ParsePrimaryExpression();
 static unique_ptr<Expression> ParseVariableExpression();
-static unique_ptr<Statement>  ParseIdentifierExpressionStatement();
+static unique_ptr<Expression> ParseFunctionDeclaration();
 
 static unique_ptr<Expression> ParseExpression(int priority) 
 {
+	bool isExpression = parser->state == ParseState::Expression;
+
+	OrState(ParseState::Expression);
+
 	unique_ptr<Expression> left = ParseUnaryExpression();
 
 	while (1)
@@ -170,35 +186,11 @@ static unique_ptr<Expression> ParseExpression(int priority)
 		BinaryType type = GetBinaryType(token.type);
 		int newPriority = GetBinaryPriority(type);
 
-		if (newPriority == 0 || newPriority <= priority) {
-			return left;
-		}
-
-		Advance();  // Through operator
-
-		unique_ptr<Binary> binary = make_unique<Binary>();
-		binary->binaryType = type;
-		binary->type = left->type; // The type of the binary expression is the type of the left operand
-
-		binary->operatorToken = token;
-		binary->left = std::move(left);
-		binary->right = ParseExpression(newPriority);
-
-		left = std::move(binary);
-	}
-}
-
-// Parses the rest of an expression given the left operand
-static unique_ptr<Expression> ParseExpressionFromLeft(unique_ptr<Expression> left, int priority)
-{
-	while (1)
-	{
-		Token token = parser->current;
-
-		BinaryType type = GetBinaryType(token.type);
-		int newPriority = GetBinaryPriority(type);
-
-		if (newPriority == 0 || newPriority <= priority) {
+		if (newPriority == 0 || newPriority <= priority) 
+		{
+			if (!isExpression)
+				ResetState();
+		
 			return left;
 		}
 
@@ -220,7 +212,7 @@ static unique_ptr<Expression> ParseUnaryExpression()
 {
 	Token* token = &parser->current;
 
-	// Grouping
+	// Handle groupings
 	if (token->type == TokenType::LeftParen)
 	{
 		Advance(); // Through (
@@ -264,10 +256,9 @@ static unique_ptr<Expression> ParseUnaryExpression()
 			type = UnaryType::PostfixDecrement;
 			break;
 		default:
-			return ParsePrimaryExpression(); // Parse a primary expr if we shouldn't parse a unary one
+			return ParsePrimaryExpression(); // Parse a primary expression if we shouldn't parse a unary one
 		}
 
-		// Make token point to the next one
 		token = &next;
 		
 		unique_ptr<Unary> unary = make_unique<Unary>();
@@ -281,7 +272,7 @@ static unique_ptr<Expression> ParseUnaryExpression()
 	}
 }
 
-static unique_ptr<Return> ParseReturnStatement()
+static unique_ptr<Expression> ParseReturnStatement()
 {
 	auto returnExpr = make_unique<Return>();
 	returnExpr->expression = ParseExpression(-1);
@@ -367,7 +358,7 @@ static unique_ptr<Statement> ParseExpressionStatement()
 	return statement;
 }
 
-static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
+static unique_ptr<Expression> ParseFunctionDeclaration()
 {
 	Token* current = &parser->current;
 	auto function = make_unique<FunctionDefinition>();
@@ -390,6 +381,14 @@ static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 		param.type = TypeFromString(current->start);
 
 		Advance(); // Through type
+
+		if (current->type == TokenType::Ampersand)
+		{
+			// By reference
+			param.flags |= VariableFlags_Reference;
+			Advance(); // Through & 
+		}
+
 		param.name = std::string(current->start, current->length);
 		function->params.push_back(param);
 
@@ -441,11 +440,11 @@ static unique_ptr<FunctionDefinition> ParseFunctionDeclaration()
 	return function;
 }
 
-static unique_ptr<Call> ParseFunctionCall()
+static unique_ptr<Expression> ParseFunctionCall()
 {
 	// Whether or not this function call is being used as an argument in another function call (nested?)
-	bool isArgument    = parser->state == Parser::State::FunctionCallArgs;
-	bool isInitializer = parser->state == Parser::State::VariableInitializer;
+	bool isArgument    = parser->state == ParseState::FuncCallArgs;
+	bool isInitializer = parser->state == ParseState::VariableInit;
 
 	Token* current = &parser->current;
 
@@ -455,24 +454,26 @@ static unique_ptr<Call> ParseFunctionCall()
 	Advance(); // Through name
 	Advance(); // Through (
 
-	SetState(Parser::State::FunctionCallArgs);
+	ParseState previousState = parser->state;
+	OrState(ParseState::FuncCallArgs);
 	// Parse arguments
 	while (current->type != TokenType::RightParen)
 	{
+		SaveState();
 		call->args.push_back(ParseExpression(-1));
+		ResetState();
 
 		if (current->type != TokenType::RightParen)
 			Expect(TokenType::Comma, "Expected ',' after argument");
 	}
 	Advance(); // Through )
 
+	parser->state = previousState;
+
 	// If we are not an argument, reset state and advance through semicolon
 	// Also make sure we are not initializing a variable so that we don't advance through the semicolon we need
 	if (!isArgument && !isInitializer)
-	{
-		ResetState();
 		Advance();
-	}
 
 	return call;
 }
@@ -481,42 +482,34 @@ static unique_ptr<Expression> ParseVariableExpression()
 {
 	Token* current = &parser->current;
 
-	auto variable = make_unique<VariableAccess>();
+	auto variable = make_unique<VariableRead>();
 	variable->name = std::string(current->start, current->length);
 	variable->type = GetVariableType(variable->name);
 
-	BinaryType type = (BinaryType)0;
-	if ((type = GetBinaryType(parser->lexer->nextToken.type)) != (BinaryType)0)
-	{
-		// We are using this variable in a binary operation
-		Advance(); // To operator
-		Advance(); // Through operator
-		variable->assignor = ParseExpression(-1);
-		Expect(TokenType::Semicolon, "Expected ';' after expression");
-	}
-	else {
-		Advance(); // Through identifier
-	}
+	Advance(); // Through identifier
 
 	return variable;
 }
 
-static unique_ptr<Statement> ParseIdentifierExpressionStatement()
+static unique_ptr<Statement> ParseVariableStatement()
 {
-	Token* current = &parser->current; // At identifier
+	Token* current = &parser->current;
 
-	Token* next = &parser->lexer->nextToken;
-	switch (next->type)
-	{
-	case TokenType::DoubleColon:
-		return ParseFunctionDeclaration();
-	case TokenType::LeftParen:
-		return ParseFunctionCall();
-	default:
-		return ParseVariableExpression(); // Accessing id
-	}
+	std::string name = std::string(current->start, current->length);
+	Type type = GetVariableType(name);
 
-	throw LimeError("Invalid identifier expression '%.*s'", next->length, next->start);
+	auto variable = make_unique<VariableWrite>();
+	variable->name = name;
+	variable->type = type;
+
+	Advance(); // Through identifier
+	Advance(); // Through operator
+
+	variable->right = ParseExpression(-1);
+
+	Expect(TokenType::Semicolon, "Expected ';' after statement");
+
+	return variable;
 }
 
 static unique_ptr<Statement> ParseVariableDeclarationStatement()
@@ -554,7 +547,7 @@ static unique_ptr<Statement> ParseVariableDeclarationStatement()
 	}
 	else if (parser->current.type == TokenType::Equal)
 	{
-		SetState(Parser::State::VariableInitializer);
+		OrState(ParseState::VariableInit);
 
 		Advance(); // Through =
 		
@@ -631,7 +624,20 @@ static unique_ptr<Statement> ParseStatement()
 	case TokenType::Mut:
 		return ParseVariableDeclarationStatement();
 	case TokenType::ID:
-		return ParseIdentifierExpressionStatement();
+	{
+		Token* next = &parser->lexer->nextToken;
+		switch (next->type)
+		{
+		case TokenType::DoubleColon:
+			return ParseFunctionDeclaration();
+		case TokenType::LeftParen:
+			return ParseFunctionCall();
+		default:
+			return ParseVariableStatement();
+		}
+
+		throw LimeError("Invalid identifier expression '%.*s'", next->length, next->start);
+	}
 	case TokenType::If:
 		return ParseBranchStatement();
 	}
@@ -676,16 +682,17 @@ static unique_ptr<Compound> ParseModule()
 
 ParseResult Parser::Parse(Lexer* lexer)
 {
-	parser = this;
-	parser->lexer = lexer;
-	parser->scope = &scopes[0];
-
-	Advance(); // Lex the first token
-
 	ParseResult result{};
-
+	
 	try
 	{
+		parser = this;
+		parser->lexer = lexer;
+		parser->scope = &scopes[0];
+
+		Advance(); // Lex the first token
+		
+		
 		auto compound = ParseModule();
 		PrintStatement(compound.get());
 		

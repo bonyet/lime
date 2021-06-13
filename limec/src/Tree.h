@@ -158,7 +158,7 @@ struct Binary : public Expression
 		case BinaryType::Subtract:     return "Subtract";
 		case BinaryType::Multiply:     return "Multiply";
 		case BinaryType::Divide:       return "Divide";
-		case BinaryType::Assign:        return "Assign";
+		case BinaryType::Assign:       return "Assign";
 		case BinaryType::Equal:        return "Equal";
 		case BinaryType::Less:         return "Less";
 		case BinaryType::LessEqual:    return "LessEqual";
@@ -239,6 +239,15 @@ struct Return : public Expression
 	llvm::Value* Generate() override { return expression->Generate(); }
 };
 
+enum VariableFlags : short
+{
+	VariableFlags_None      = 0 << 0,
+	VariableFlags_Immutable = 1 << 0,
+	VariableFlags_Mutable   = 1 << 1,
+	VariableFlags_Global    = 1 << 2,
+	VariableFlags_Reference = 1 << 3,
+};
+
 // Yes, function declarations don't technically express anything, but this just inherits from Expression anyways
 struct FunctionDefinition : public Expression
 {
@@ -246,6 +255,7 @@ struct FunctionDefinition : public Expression
 	{
 		std::string name;
 		Type type = (Type)0;
+		VariableFlags flags = VariableFlags_None;
 	};
 
 	std::string name;
@@ -290,14 +300,6 @@ struct FunctionDefinition : public Expression
 	llvm::Value* Generate() override;
 };
 
-enum VariableFlags : int
-{
-	VariableFlags_None      = 0,
-	VariableFlags_Immutable = 1 << 0,
-	VariableFlags_Mutable   = 1 << 1,
-	VariableFlags_Global    = 1 << 2,
-};
-
 inline VariableFlags operator|(VariableFlags a, VariableFlags b)
 {
 	return (VariableFlags)((int)a | (int)b);
@@ -323,14 +325,26 @@ struct VariableDefinition : public Statement
 	llvm::Value* Generate() override;
 };
 
-struct VariableAccess : public Expression
+struct VariableRead : public Expression
 {
 	std::string name;
-	std::unique_ptr<Expression> assignor = nullptr;
 
 	std::string ToString(int& indent) override
 	{
-		return FormatString("| [VarAccess]: %s\n", name.c_str());
+		return FormatString("| [VarRead]: %s\n", name.c_str());
+	}
+
+	llvm::Value* Generate() override;
+};
+
+struct VariableWrite : public Expression
+{
+	std::string name;
+	std::unique_ptr<Expression> right;
+
+	std::string ToString(int& indent) override
+	{
+		return FormatString("| [VarWrite]: %s\n", name.c_str());
 	}
 
 	llvm::Value* Generate() override;

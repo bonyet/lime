@@ -1,8 +1,6 @@
 #pragma once
 
-#include <cstdint>
-
-enum class TokenType : uint16_t
+enum class TokenType : char
 {
 	Error, Eof,
 

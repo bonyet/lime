@@ -6,8 +6,6 @@
 #include <string>
 #include "Utils.h"
 
-#include <llvm\IR\Value.h>
-
 struct Statement
 {
 	virtual ~Statement() {}

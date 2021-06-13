@@ -1,3 +1,4 @@
+#include <llvm/IR/Value.h>
 #include "TreePrinter.h"
 
 static void PrintCompound(Compound* compound)

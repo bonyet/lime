@@ -1,10 +1,10 @@
-#include <iostream>
+#include <llvm/IR/Value.h>
+#include "Tree.h"
+
 #include "Parser.h"
-
-#include <chrono>
-#include <fstream>
-
 #include "Generator.h"
+
+#include <fstream>
 
 static std::string ReadFile(const char* filepath)
 {

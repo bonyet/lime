@@ -1,3 +1,5 @@
+#include <llvm/IR/Value.h>
+#include "Tree.h"
 #include "Parser.h"
 
 #include "TreePrinter.h"

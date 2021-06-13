@@ -3,11 +3,13 @@
 
 #include "Error.h"
 
-#include "Generator.h"
-
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Verifier.h>
+#include <llvm/IR/Value.h>
+
+#include "Tree.h"
+#include "Generator.h"
 
 static std::unique_ptr<llvm::LLVMContext> context;
 static std::unique_ptr<llvm::IRBuilder<>> builder;
@@ -444,11 +446,7 @@ Generator::Generator()
 	builder = std::make_unique<llvm::IRBuilder<>>(*context);
 }
 
-Generator::~Generator()
-{
-}
-
-void Generator::Generate(std::unique_ptr<struct Compound> compound)
+void Generator::Generate(std::unique_ptr<Compound> compound)
 {
 	try
 	{
@@ -456,11 +454,11 @@ void Generator::Generate(std::unique_ptr<struct Compound> compound)
 		{
 			child->Generate();
 		}
+
+		module->print(llvm::errs(), nullptr);
 	}
 	catch (CompileError& err)
 	{
 		fprintf(stderr, "CodeGenError: %s\n\n", err.message.c_str());
 	}
-
-	module->print(llvm::errs(), nullptr);
 }

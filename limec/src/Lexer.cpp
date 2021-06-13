@@ -1,12 +1,9 @@
 #include "Lexer.h"
 
-#include <memory>
 #include <string>
 #include "Utils.h"
 
 #include "Error.h"
-
-#include <cassert>
 
 static Lexer* lexer;
 
@@ -41,14 +38,22 @@ static bool IsDigit(char c)
 	return c >= '0' && c <= '9';
 }
 
-static void SkipWhitespace()
+static bool IsAtComment()
 {
-	// Handle comments
-	if (lexer->current[0] == '/' && lexer->current[1] == '/')
+	return lexer->current[0] == '/' && lexer->current[1] == '/';
+}
+static void SkipComment()
+{
+	if (IsAtComment())
 	{
 		while (*lexer->current != '\n' && *lexer->current != '\0')
 			Advance(1);
 	}
+}
+
+static void SkipWhitespace()
+{
+	SkipComment();
 
 	while (IsWhitespace(*lexer->current))
 	{
@@ -57,6 +62,9 @@ static void SkipWhitespace()
 
 		Advance(1);
 	}
+
+	if (IsAtComment())
+		SkipWhitespace(); // Recurse if there is another comment after this comment
 }
 
 static Token MakeIdentifier()

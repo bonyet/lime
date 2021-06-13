@@ -3,8 +3,7 @@
 
 main :: ()
 {
-	mut int i = 0;
+	int i = 0;
 	i = 5;
 	i = 10 * 69;
-	i = i;
 }

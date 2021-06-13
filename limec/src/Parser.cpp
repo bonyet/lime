@@ -288,6 +288,13 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 	{
 		case TokenType::ID:
 		{
+			Token* next = &parser->lexer->nextToken;
+
+			if (next->type == TokenType::LeftParen)
+			{
+				return ParseFunctionCall();
+			}
+
 			return ParseVariableExpression();
 		}
 		case TokenType::Return:
@@ -443,8 +450,8 @@ static unique_ptr<Expression> ParseFunctionDeclaration()
 static unique_ptr<Expression> ParseFunctionCall()
 {
 	// Whether or not this function call is being used as an argument in another function call (nested?)
-	bool isArgument    = parser->state == ParseState::FuncCallArgs;
-	bool isInitializer = parser->state == ParseState::VariableInit;
+	bool isArgument    = parser->state & ParseState::FuncCallArgs;
+	bool isInitializer = parser->state & ParseState::VariableInit;
 
 	Token* current = &parser->current;
 

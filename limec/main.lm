@@ -4,15 +4,14 @@
 // Multiple return values
 // Annotations / attributes
 
-modify :: (int& val, int& val2)
+modify :: (int& val, int& val2) -> int
 {
-	val = val + val2;
+	return val + val2;
 }
 
 main :: ()
 {
 	int a = 0;
 	int b = 69;
-	b = 12 * 5;
-	modify(a, b);
+	int sum = modify(a, b);
 }

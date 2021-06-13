@@ -430,11 +430,11 @@ llvm::Value* FunctionDefinition::Generate()
 Generator::Generator()
 {
 	context = std::make_unique<llvm::LLVMContext>();
-	module = std::make_unique<llvm::Module>("Module", *context);
+	module = std::make_unique<llvm::Module>(llvm::StringRef(), *context);
 	builder = std::make_unique<llvm::IRBuilder<>>(*context);
 }
 
-void Generator::Generate(std::unique_ptr<Compound> compound)
+std::string Generator::Generate(std::unique_ptr<Compound> compound)
 {
 	try
 	{
@@ -443,7 +443,10 @@ void Generator::Generate(std::unique_ptr<Compound> compound)
 			child->Generate();
 		}
 
-		module->print(llvm::errs(), nullptr);
+		std::string ir;
+		llvm::raw_string_ostream stream(ir);
+		module->print(stream, nullptr);
+		return ir;
 	}
 	catch (CompileError& err)
 	{

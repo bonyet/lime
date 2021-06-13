@@ -5,5 +5,5 @@ class Generator
 public:
 	Generator();
 
-	void Generate(std::unique_ptr<Compound> module);
+	std::string Generate(std::unique_ptr<Compound> module);
 };

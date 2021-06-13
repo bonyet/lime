@@ -3,6 +3,7 @@
 
 #include "Parser.h"
 #include "Generator.h"
+#include "Emitter.h"
 
 #include <fstream>
 
@@ -24,6 +25,8 @@ static std::string ReadFile(const char* filepath)
 	stream.seekg(0, std::ios::beg);
 
 	fileContents.assign(std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>());
+
+	stream.close();
 
 	return fileContents;
 }
@@ -53,6 +56,19 @@ int main(int argc, const char* argv[])
 	if (parseResult.Succeeded)
 	{
 		Generator generator;
-		generator.Generate(std::move(parseResult.module));
+		std::string ir = generator.Generate(std::move(parseResult.module));
+
+		Emitter emitter;
+		emitter.Emit(ir, "result.ll");
+		
+#ifdef _WIN32
+		// Generate bitcode
+		system("llvm-as result.ll");
+
+		// Generate ASM
+		system("llc result.bc");
+#else
+	#error "Sorry bro"
+#endif
 	}
 }

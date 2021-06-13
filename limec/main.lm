@@ -3,9 +3,22 @@
 // Structures then classes
 // Multiple return values
 // Annotations / attributes
+// Generics
+
+sum :: (int a, int b) -> int
+{
+	return a + b;
+}
+
+sum :: (float a, float b) -> float
+{
+	return a + b;
+}
 
 main :: ()
 {
 	mut int a = 0;
-	a = 5;
+	a = sum(a, 5);
+	mut float b = 0.0f;
+	b = sum(b, 5.0f);
 }

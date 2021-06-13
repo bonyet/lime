@@ -451,7 +451,7 @@ static unique_ptr<Expression> ParseFunctionCall()
 {
 	// Whether or not this function call is being used as an argument in another function call (nested?)
 	bool isArgument    = parser->state & ParseState::FuncCallArgs;
-	bool isInitializer = parser->state & ParseState::VariableInit;
+	bool isInitializer = parser->state & ParseState::VariableWrite;
 
 	Token* current = &parser->current;
 
@@ -512,7 +512,10 @@ static unique_ptr<Statement> ParseVariableStatement()
 	Advance(); // Through identifier
 	Advance(); // Through operator
 
+	auto previousState = parser->state;
+	OrState(ParseState::VariableWrite);
 	variable->right = ParseExpression(-1);
+	parser->state = previousState;
 
 	Expect(TokenType::Semicolon, "Expected ';' after statement");
 
@@ -554,7 +557,7 @@ static unique_ptr<Statement> ParseVariableDeclarationStatement()
 	}
 	else if (parser->current.type == TokenType::Equal)
 	{
-		OrState(ParseState::VariableInit);
+		OrState(ParseState::VariableWrite);
 
 		Advance(); // Through =
 		
@@ -697,8 +700,7 @@ ParseResult Parser::Parse(Lexer* lexer)
 		parser->lexer = lexer;
 		parser->scope = &scopes[0];
 
-		Advance(); // Lex the first token
-		
+		Advance(); // Lex the first token		
 		
 		auto compound = ParseModule();
 		PrintStatement(compound.get());

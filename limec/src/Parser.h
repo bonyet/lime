@@ -10,10 +10,10 @@ struct ParseResult
 
 enum class ParseState : int
 {
-	Default      = 0 << 0,
-	Expression   = 1 << 0,
-	VariableInit = 1 << 1,
-	FuncCallArgs = 1 << 2,
+	Default       = 0 << 0,
+	Expression    = 1 << 0,
+	VariableWrite = 1 << 1,
+	FuncCallArgs  = 1 << 2,
 };
 
 inline int operator&(ParseState a, ParseState b)

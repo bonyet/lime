@@ -1,4 +1,7 @@
 #include <llvm/IR/Value.h>
+
+#include "PlatformUtils.h"
+
 #include "Tree.h"
 
 #include "Parser.h"
@@ -63,10 +66,9 @@ int main(int argc, const char* argv[])
 		
 #ifdef _WIN32
 		// Generate bitcode
-		system("llvm-as result.ll");
-
+		LaunchProcess("\"llvm-as\" result.ll");
 		// Generate ASM
-		system("llc result.bc");
+		LaunchProcess("\"llc\" result.bc");
 #else
 	#error "Sorry bro"
 #endif

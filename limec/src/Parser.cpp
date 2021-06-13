@@ -156,7 +156,7 @@ static unique_ptr<Statement>  ParseStatement();
 static unique_ptr<Expression> ParseUnaryExpression();
 static unique_ptr<Statement>  ParseCompoundStatement();
 static unique_ptr<Expression> ParsePrimaryExpression();
-static unique_ptr<Statement>  ParseVariableExpressionStatement();
+static unique_ptr<Expression> ParseVariableExpression();
 static unique_ptr<Statement>  ParseIdentifierExpressionStatement();
 
 static unique_ptr<Expression> ParseExpression(int priority) 
@@ -295,6 +295,10 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 	
 	switch (token.type)
 	{
+		case TokenType::ID:
+		{
+			return ParseVariableExpression();
+		}
 		case TokenType::Return:
 		{
 			Advance();
@@ -473,7 +477,7 @@ static unique_ptr<Call> ParseFunctionCall()
 	return call;
 }
 
-static unique_ptr<Statement> ParseVariableExpressionStatement()
+static unique_ptr<Expression> ParseVariableExpression()
 {
 	Token* current = &parser->current;
 
@@ -509,7 +513,7 @@ static unique_ptr<Statement> ParseIdentifierExpressionStatement()
 	case TokenType::LeftParen:
 		return ParseFunctionCall();
 	default:
-		return ParseVariableExpressionStatement(); // Accessing id
+		return ParseVariableExpression(); // Accessing id
 	}
 
 	throw LimeError("Invalid identifier expression '%.*s'", next->length, next->start);

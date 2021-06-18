@@ -295,6 +295,15 @@ static void ProcessToken(Token* token)
 		}
 		break;
 	}
+	case 'c':
+	{
+		if (CheckKeyword("class", 5))
+		{
+			*token = MakeToken(TokenType::Class, 5);
+			return;
+		}
+		break;
+	}
 	case 'e':
 	{
 		if (CheckKeyword("else", 4))
@@ -355,6 +364,15 @@ static void ProcessToken(Token* token)
 		if (CheckKeyword("return", 6))
 		{
 			*token = MakeToken(TokenType::Return, 6);
+			return;
+		}
+		break;
+	}
+	case 's':
+	{
+		if (CheckKeyword("struct", 6))
+		{
+			*token = MakeToken(TokenType::Struct, 6);
 			return;
 		}
 		break;

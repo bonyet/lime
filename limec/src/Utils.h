@@ -15,3 +15,15 @@ static std::string FormatString(const char* format, Args&&... args)
 
 	return result;
 }
+
+// C-like helper function to check if a string contains a char up to a certain amount of characters
+static bool strnchr(const char* string, const char c, int n)
+{
+	for (int i = 0; i < n; i++)
+	{
+		if (string[i] == c)
+			return true;
+	}
+
+	return false;
+}

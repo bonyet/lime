@@ -1,15 +1,15 @@
 #pragma once
 
 #include "Lexer.h"
-#include "Type.h"
 
 #include <string>
 #include "Utils.h"
 
+#include "Type.h"
+
 struct Statement
 {
 	virtual ~Statement() {}
-	virtual std::string ToString(int& indent) { return "| [Statement]\n"; }
 
 	virtual llvm::Value* Generate() { return nullptr; }
 };
@@ -18,33 +18,16 @@ struct Statement
 struct Compound : public Statement
 {
 	std::vector<std::unique_ptr<Statement>> statements;
-
-	std::string ToString(int& indent) override
-	{
-		std::string string = indent > 0 ? "| [Compound]:\n" : "[Compound]:\n";
-
-		for (auto& statement : statements)
-		{
-			string += statement->ToString(indent);
-		}
-
-		return string;
-	}
 };
 
 struct Expression : public Statement
 {
-	Type type = (Type)0;
+	Type* type;
 };
 
 struct Primary : public Expression
 {
 	Token token;
-
-	std::string ToString(int& indent) override
-	{
-		return FormatString("| [Primary]: % .*s\n", token.length, token.start);
-	}
 };
 
 // Stores int, float, or bool
@@ -57,37 +40,12 @@ struct PrimaryValue : public Primary
 		float f32;
 	} value;
 
-	std::string ToString(int& indent) override
-	{
-		std::string base = FormatString("%*c| [Primary]: ", indent, ' ');
-
-		switch (type)
-		{
-		case Type::Int:
-			base += FormatString("%i\n", value.i32);
-			break;
-		case Type::Float:
-			base += FormatString("%f\n", value.f32);
-			break;
-		case Type::Boolean:
-			base += FormatString("%s\n", value.b32 ? "true" : "false");
-			break;
-		}
-		
-		return base;
-	}
-
 	llvm::Value* Generate() override;
 };
 
 struct PrimaryString : public Primary
 {
 	std::string value;
-
-	std::string ToString(int& indent) override
-	{
-		return FormatString("| [Primary]: %s\n", value.c_str());
-	}
 };
 
 enum class UnaryType
@@ -104,30 +62,6 @@ struct Unary : public Expression
 	Token operatorToken;
 	std::unique_ptr<Expression> operand;
 	UnaryType type = (UnaryType)0;
-
-	const char* GetLabel()
-	{
-		switch (type)
-		{
-		case UnaryType::Negate:           return "| [-Unary]:\n%*c";
-		case UnaryType::PrefixIncrement:  return "| [++Unary]:\n%*c";
-		case UnaryType::PrefixDecrement:  return "| [--Unary]:\n%*c";
-		case UnaryType::PostfixIncrement: return "| [Unary++]:\n%*c";
-		case UnaryType::PostfixDecrement: return "| [Unary--]:\n%*c";
-
-		case UnaryType::AddressOf: return "| [&Unary]:\n%*c";
-		case UnaryType::Deref:     return "| [*Unary]:\n%*c";
-		}
-
-		return "<???>";
-	}
-
-	std::string ToString(int& indent) override
-	{
-		std::string result = FormatString(GetLabel(), indent, ' ');
-		result += operand->ToString(indent);
-		return result;
-	}
 };
 
 enum class BinaryType
@@ -150,36 +84,6 @@ struct Binary : public Expression
 	Token operatorToken;
 	std::unique_ptr<Expression> left, right;
 
-	const char* GetStringType()
-	{
-		switch (binaryType)
-		{
-		case BinaryType::Add:          return "Add";
-		case BinaryType::Subtract:     return "Subtract";
-		case BinaryType::Multiply:     return "Multiply";
-		case BinaryType::Divide:       return "Divide";
-		case BinaryType::Assign:       return "Assign";
-		case BinaryType::Equal:        return "Equal";
-		case BinaryType::Less:         return "Less";
-		case BinaryType::LessEqual:    return "LessEqual";
-		case BinaryType::Greater:      return "Greater";
-		case BinaryType::GreaterEqual: return "GreaterEqual";
-		}
-
-		return "<???>";
-	}
-
-	std::string ToString(int& indent) override
-	{
-		std::string result = FormatString("%*c| [%s]:\n%*c", indent, ' ', GetStringType(), indent + 2, ' ');
-
-		result += left->ToString(indent);
-		result += FormatString("%*c", indent + 2, ' ');
-		result += right->ToString(indent);
-
-		return result;
-	}
-
 	llvm::Value* Generate() override;
 };
 
@@ -189,14 +93,7 @@ struct Branch : public Statement
 	std::vector<std::unique_ptr<Statement>> ifBody;
 	std::vector<std::unique_ptr<Statement>> elseBody;
 
-	bool hasElse = false;
-
-	std::string ToString(int& indent) override
-	{
-		std::string base = FormatString("%*c| [Branch, %d]", indent, ' ', (int)hasElse);
-
-		return base;
-	}
+	bool HasElse() const { return !elseBody.empty(); }
 
 	llvm::Value* Generate() override;
 };
@@ -206,35 +103,12 @@ struct Call : public Expression
 	std::string fnName;
 	std::vector<std::unique_ptr<Expression>> args;
 
-	std::string ToString(int& indent) override
-	{
-		std::string base = FormatString("| [call %s]:\n", fnName.c_str());
-
-		for (int i = 0; i < args.size(); ++i)
-		{
-			base += args[i]->ToString(indent);
-		}
-
-		return base;
-	}
-
 	llvm::Value* Generate() override;
 };
 
 struct Return : public Expression
 {
 	std::unique_ptr<Expression> expression;
-
-	std::string ToString(int& indent) override
-	{
-		std::string base = "| [return]:\n";
-
-		indent += 2;
-		base += expression->ToString(indent);
-		indent -= 2;
-
-		return base;
-	}
 
 	llvm::Value* Generate() override { return expression->Generate(); }
 };
@@ -253,8 +127,8 @@ struct FunctionDefinition : public Expression
 {
 	struct Parameter
 	{
+		Type* type;
 		std::string name;
-		Type type = (Type)0;
 		VariableFlags flags = VariableFlags_None;
 	};
 
@@ -263,39 +137,6 @@ struct FunctionDefinition : public Expression
 	int indexOfReturnInBody = -1;
 	std::vector<std::unique_ptr<Statement>> body;
 	int scopeIndex = -1; // index into parser's scope container
-
-	std::string ToString(int& indent) override
-	{
-		std::string base = FormatString("| [%s(", name.c_str());
-
-		for (int i = 0; i < params.size(); ++i)
-		{
-			base += params[i].name;
-
-			if (params.size() > 1 && i != params.size() - 1)
-			{
-				base += ", ";
-			}
-		}
-
-		base += ")]:\n";
-
-		indent += 2;
-
-		int index = 0;
-		for (auto& statement : body)
-		{
-			if (index++ != indexOfReturnInBody)
-				base += statement->ToString(indent);
-		}
-
-		if (indexOfReturnInBody != -1)
-			base += body[indexOfReturnInBody]->ToString(indent);
-
-		indent -= 2;
-
-		return base;
-	}
 
 	llvm::Value* Generate() override;
 };
@@ -313,14 +154,17 @@ struct VariableDefinition : public Statement
 {
 	std::unique_ptr<Expression> initializer;
 	VariableFlags flags;
-	Type type = (Type)0;
 	std::string name;
 	int scope = -1;
+	Type* type;
 
-	std::string ToString(int& indent) override
-	{
-		return FormatString("| [VariableDef]: %s\n", name.c_str());
-	}
+	llvm::Value* Generate() override;
+};
+
+struct StructureDefinition : public Statement
+{
+	std::string name;
+	std::vector<std::unique_ptr<VariableDefinition>> members;
 
 	llvm::Value* Generate() override;
 };
@@ -329,11 +173,6 @@ struct VariableRead : public Expression
 {
 	std::string name;
 
-	std::string ToString(int& indent) override
-	{
-		return FormatString("| [VarRead]: %s\n", name.c_str());
-	}
-
 	llvm::Value* Generate() override;
 };
 
@@ -341,11 +180,6 @@ struct VariableWrite : public Expression
 {
 	std::string name;
 	std::unique_ptr<Expression> right;
-
-	std::string ToString(int& indent) override
-	{
-		return FormatString("| [VarWrite]: %s\n", name.c_str());
-	}
 
 	llvm::Value* Generate() override;
 };

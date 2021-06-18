@@ -24,6 +24,7 @@ enum class TokenType : char
 	True, False,
 	Int, Float, Bool,
 	Return, Mut,
+	Struct, Class,
 
 	// Misc
 	Ampersand, Pipe, Percent, At, Hashtag, ID, 

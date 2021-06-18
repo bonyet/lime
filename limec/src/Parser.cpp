@@ -1,8 +1,8 @@
 #include <llvm/IR/Value.h>
 #include "Tree.h"
+#include "Typer.h"
 #include "Parser.h"
 
-#include "TreePrinter.h"
 #include "Error.h"
 
 #include <unordered_map>
@@ -13,22 +13,12 @@ static Parser* parser;
 using std::unique_ptr;
 using std::make_unique;
 
+#define Assert(cond, msg, ...) { if (!(cond)) { throw LimeError(msg, __VA_ARGS__); } }
+
 static std::vector<Scope> scopes =
 {
 	{ }
 };
-
-// C-like helper function to check if a string contains a char up to a certain amount of characters
-static bool strnchr(const char* string, const char c, int n)
-{
-	for (int i = 0; i < n; i++)
-	{
-		if (string[i] == c)
-			return true;
-	}
-
-	return false;
-}
 
 int LimeError::GetLine()
 {
@@ -63,7 +53,7 @@ static void IncreaseScope()
 
 static int NumScopes() { return (int)scopes.size();  }
 
-static void RegisterVariable(const std::string& name, Type varType, VariableFlags flags)
+static void RegisterVariable(const std::string& name, Type* varType, VariableFlags flags)
 {
 	parser->scope->namedVariableTypes[name] = { varType, flags };
 }
@@ -74,11 +64,22 @@ static bool VariableExistsInScope(const std::string& name, Scope* scope = nullpt
 
 	return parser->scope->namedVariableTypes.count(name) == 1;
 }
-static Type GetVariableType(const std::string& name, Scope* scope = nullptr)
-{
-	if (scope)
-		return scope->namedVariableTypes[name].type;
 
+// If the type has not been added yet, it will create it
+template<typename As = Type>
+static As* GetType(const std::string& typeName)
+{
+	for (Type* type : Typer::GetAll())
+	{
+		if (type->name == typeName)
+			return static_cast<As*>(type);
+	}
+
+	return Typer::Add<As>(typeName);
+}
+
+static Type* GetVariableType(const std::string& name)
+{
 	return parser->scope->namedVariableTypes[name].type;
 }
 
@@ -93,11 +94,7 @@ static void Expect(TokenType type, const char* errorMessageFmt, Args&&... args)
 
 // TODO: better system for saving parse state
 static ParseState oldState = ParseState::Default;
-static void SetState(ParseState state)
-{
-	oldState = parser->state;
-	parser->state = state;
-}
+
 static void SaveState()
 {
 	oldState = parser->state;
@@ -113,7 +110,7 @@ static void ResetState()
 
 static bool IsArithmetic(Type type)
 {
-	return type == Type::Int || type == Type::Float;
+	return type == Type::int32Type || type == Type::floatType;
 }
 
 static BinaryType GetBinaryType(TokenType type)
@@ -169,7 +166,8 @@ static unique_ptr<Expression> ParseUnaryExpression();
 static unique_ptr<Statement>  ParseCompoundStatement();
 static unique_ptr<Expression> ParsePrimaryExpression();
 static unique_ptr<Expression> ParseVariableExpression();
-static unique_ptr<Expression> ParseFunctionDeclaration();
+static unique_ptr<Expression> ParseFunctionDeclaration(Token* current);
+static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement();
 
 static unique_ptr<Expression> ParseExpression(int priority) 
 {
@@ -308,7 +306,7 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 
 			auto primary = make_unique<PrimaryValue>();
 			primary->value.b32 = true;
-			primary->type = Type::Boolean;
+			primary->type = Type::boolType;
 			return primary;
 		}
 		case TokenType::False:
@@ -317,7 +315,7 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 
 			auto primary = make_unique<PrimaryValue>();
 			primary->value.b32 = false;
-			primary->type = Type::Boolean;
+			primary->type = Type::boolType;
 			return primary;
 		}
 		case TokenType::Number:
@@ -331,12 +329,12 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 			if (strnchr(token.start, '.', token.length))
 			{
 				primary->value.f32 = strtof(token.start, nullptr);
-				primary->type = Type::Float;
+				primary->type = Type::floatType;
 			}
 			else
 			{
 				primary->value.i32 = (int)strtol(token.start, nullptr, 0);
-				primary->type = Type::Int;
+				primary->type = Type::int32Type;
 			}
 			
 			return primary;
@@ -346,7 +344,7 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 			Advance();
 
 			auto primary = make_unique<PrimaryString>();
-			primary->type = Type::String;
+			primary->type = Type::stringType;
 			primary->token = token;
 
 			primary->value = std::string(token.start, token.length);
@@ -365,19 +363,19 @@ static unique_ptr<Statement> ParseExpressionStatement()
 	return statement;
 }
 
-static unique_ptr<Expression> ParseFunctionDeclaration()
+static unique_ptr<Expression> ParseFunctionDeclaration(Token* nameToken)
 {
-	Token* current = &parser->current;
 	auto function = make_unique<FunctionDefinition>();
 
 	// Find name
-	function->name = std::string(current->start, current->length);
-	function->type = Type::Void; // By default, functions return void
+	function->name = std::string(nameToken->start, nameToken->length);
+	function->type = Type::voidType; // By default, functions return void
 	function->scopeIndex = parser->scopeDepth;
 
 	DeepenScope();
 
-	Advance(); // To ::
+	Token* current = &parser->current;
+
 	Advance(); // Through ::
 	Expect(TokenType::LeftParen, "Expected '(' after '::'");
 
@@ -385,7 +383,7 @@ static unique_ptr<Expression> ParseFunctionDeclaration()
 	while (current->type != TokenType::RightParen)
 	{
 		FunctionDefinition::Parameter param;
-		param.type = TypeFromString(current->start);
+		param.type = GetType(std::string(current->start, current->length));
 
 		Advance(); // Through type
 
@@ -414,7 +412,7 @@ static unique_ptr<Expression> ParseFunctionDeclaration()
 	{
 		Advance(); // Through ->
 
-		function->type = TypeFromString(parser->current.start);
+		function->type = GetType(std::string(current->start, current->length));
 		
 		Advance(); // Through type
 	}
@@ -439,7 +437,7 @@ static unique_ptr<Expression> ParseFunctionDeclaration()
 
 	Expect(TokenType::RightCurlyBracket, "Expected '}' after function body");
 	
-	if (function->indexOfReturnInBody == -1 && function->type != Type::Void)
+	if (function->indexOfReturnInBody == -1 && function->type != GetType("void"))
 	{
 		throw LimeError("Expected a return statement within '%s'", function->name.c_str());
 	}
@@ -503,7 +501,7 @@ static unique_ptr<Statement> ParseVariableStatement()
 	Token* current = &parser->current;
 
 	std::string name = std::string(current->start, current->length);
-	Type type = GetVariableType(name);
+	Type* type = GetVariableType(name);
 
 	auto variable = make_unique<VariableWrite>();
 	variable->name = name;
@@ -522,7 +520,7 @@ static unique_ptr<Statement> ParseVariableStatement()
 	return variable;
 }
 
-static unique_ptr<Statement> ParseVariableDeclarationStatement()
+static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
 {
 	VariableFlags flags = VariableFlags_Immutable; // Immutable by default
 
@@ -544,7 +542,7 @@ static unique_ptr<Statement> ParseVariableDeclarationStatement()
 	auto variable = make_unique<VariableDefinition>();
 	variable->scope = parser->scopeDepth;
 	variable->name = std::string(nameToken.start, nameToken.length);
-	variable->type = TypeFromString(startToken.start);
+	variable->type = GetType(std::string(startToken.start, startToken.length));
 	variable->flags = flags;
 
 	RegisterVariable(variable->name, variable->type, variable->flags);
@@ -599,7 +597,7 @@ static unique_ptr<Statement> ParseBranchStatement()
 	IncreaseScope();
 	DeepenScope();
 
-	if (statement->hasElse = current->type == TokenType::Else)
+	if (current->type == TokenType::Else)
 	{
 		// We have an else body
 		Advance(); // Through else
@@ -618,6 +616,37 @@ static unique_ptr<Statement> ParseBranchStatement()
 	IncreaseScope();
 
 	return statement;
+}
+
+static unique_ptr<Statement> ParseStructureDeclaration(Token* nameToken)
+{
+	// Start at struct keyword
+
+	auto structure = make_unique<StructureDefinition>();
+	structure->name = std::string(nameToken->start, nameToken->length);
+	auto type = GetType<UserDefinedType>(structure->name);
+
+	Advance(); // Through ::
+	Advance(); // Through 'struct'
+	Expect(TokenType::LeftCurlyBracket, "Expected '{' after 'struct'");
+
+	Token* current = &parser->current;
+	
+	DeepenScope();
+	
+	// Parse body
+	while (current->type != TokenType::RightCurlyBracket)
+	{
+		auto decl = ParseVariableDeclarationStatement();
+		type->memberTypes.push_back(decl->type);
+		structure->members.push_back(std::move(decl));
+	}
+
+	IncreaseScope();
+
+	Expect(TokenType::RightCurlyBracket, "Expected '}' ater struct body");
+
+	return structure;
 }
 
 static unique_ptr<Statement> ParseStatement()
@@ -639,7 +668,20 @@ static unique_ptr<Statement> ParseStatement()
 		switch (next->type)
 		{
 		case TokenType::DoubleColon:
-			return ParseFunctionDeclaration();
+		{
+			Token identifier = *token;
+			Advance();
+
+			switch (next->type)
+			{
+			case TokenType::LeftParen:
+				return ParseFunctionDeclaration(&identifier);
+			case TokenType::Struct:
+				return ParseStructureDeclaration(&identifier);
+			default:
+				throw CompileError("Invalid declaration");
+			}
+		}
 		case TokenType::LeftParen:
 			return ParseFunctionCall();
 		default:
@@ -693,17 +735,16 @@ static unique_ptr<Compound> ParseModule()
 ParseResult Parser::Parse(Lexer* lexer)
 {
 	ParseResult result{};
-	
+
 	try
 	{
 		parser = this;
 		parser->lexer = lexer;
 		parser->scope = &scopes[0];
 
-		Advance(); // Lex the first token		
+		Advance(); // Lex the first token
 		
 		auto compound = ParseModule();
-		PrintStatement(compound.get());
 		
 		result.Succeeded = true;
 		result.module = std::move(compound);

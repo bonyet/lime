@@ -9,6 +9,7 @@
 #include <llvm/IR/Value.h>
 
 #include "Tree.h"
+#include "Typer.h"
 #include "Generator.h"
 
 static std::unique_ptr<llvm::LLVMContext> context;
@@ -26,33 +27,15 @@ struct NamedValue
 
 static std::unordered_map<std::string, NamedValue> namedValues;
 
-// Utils
-static llvm::Type* GetLLVMType(Type type)
-{
-	switch (type)
-	{
-	case Type::Int:
-		return llvm::Type::getInt32Ty(*context);
-	case Type::Float:
-		return llvm::Type::getFloatTy(*context);
-	case Type::Boolean:
-		return llvm::Type::getInt1Ty(*context);
-	case Type::Void:
-		return llvm::Type::getVoidTy(*context);
-	}
-
-	throw CompileError("Unknown type");
-}
-
 llvm::Value* PrimaryValue::Generate()
 {
-	switch (type)
+	switch (type->name[0])
 	{
-	case Type::Int:
+	case 'i':
 		return llvm::ConstantInt::get(*context, llvm::APInt(32, value.i32));
-	case Type::Float:
+	case 'f':
 		return llvm::ConstantFP::get(*context, llvm::APFloat(value.f32));
-	case Type::Boolean:
+	case 'b':
 		return llvm::ConstantInt::getBool(*context, value.b32);
 	}
 }
@@ -75,7 +58,7 @@ llvm::Value* VariableDefinition::Generate()
 {
 	using namespace llvm;
 	
-	llvm::Type* type = GetLLVMType(this->type);
+	llvm::Type* type = this->type->raw;
 	if (scope == 0)
 	{
 		// Global varable
@@ -133,7 +116,7 @@ llvm::Value* VariableWrite::Generate()
 }
 
 static llvm::Value* CreateBinOp(llvm::Value* left, llvm::Value* right, 
-	BinaryType type, Type lType, VariableFlags lFlags, VariableFlags rFlags)
+	BinaryType type, Type* lType, VariableFlags lFlags, VariableFlags rFlags)
 {
 	using llvm::Instruction;
 
@@ -144,28 +127,28 @@ static llvm::Value* CreateBinOp(llvm::Value* left, llvm::Value* right,
 			Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
 		case BinaryType::Add:
 		{
-			instruction = lType == Type::Int ? Instruction::Add : Instruction::FAdd;
+			instruction = lType->isInt() ? Instruction::Add : Instruction::FAdd;
 			break;
 		}
 		case BinaryType::CompoundSub:
 			Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
 		case BinaryType::Subtract:
 		{
-			instruction = lType == Type::Int ? Instruction::Sub : Instruction::FSub;
+			instruction = lType->isInt() ? Instruction::Sub : Instruction::FSub;
 			break;
 		}
 		case BinaryType::CompoundMul:
 			Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
 		case BinaryType::Multiply:
 		{
-			instruction = lType == Type::Int ? Instruction::Mul : Instruction::FMul;
+			instruction = lType->isInt() ? Instruction::Mul : Instruction::FMul;
 			break;
 		}
 		case BinaryType::CompoundDiv:
 			Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
 		case BinaryType::Divide:
 		{
-			if (lType == Type::Int)
+			if (lType->isInt())
 				throw CompileError("Integer division not supported");
 		
 			instruction = Instruction::FDiv;
@@ -179,27 +162,27 @@ static llvm::Value* CreateBinOp(llvm::Value* left, llvm::Value* right,
 		}
 		case BinaryType::Equal:
 		{
-			return lType == Type::Int ? builder->CreateICmpEQ(left, right, "cmptmp") :
+			return lType->isInt() ? builder->CreateICmpEQ(left, right, "cmptmp") :
 				builder->CreateFCmpUEQ(left, right, "cmptmp");
 		}
 		case BinaryType::Less:
 		{
-			return lType == Type::Int ? builder->CreateICmpULT(left, right, "cmptmp") :
+			return lType->isInt() ? builder->CreateICmpULT(left, right, "cmptmp") :
 				builder->CreateFCmpULT(left, right, "cmptmp");
 		}
 		case BinaryType::LessEqual:
 		{
-			return lType == Type::Int ? builder->CreateICmpULE(left, right, "cmptmp") :
+			return lType->isInt() ? builder->CreateICmpULE(left, right, "cmptmp") :
 				builder->CreateFCmpULE(left, right, "cmptmp");
 		}
 		case BinaryType::Greater:
 		{
-			return lType == Type::Int ? builder->CreateICmpUGT(left, right, "cmptmp") :
+			return lType->isInt() ? builder->CreateICmpUGT(left, right, "cmptmp") :
 				builder->CreateFCmpUGT(left, right, "cmptmp");
 		}
 		case BinaryType::GreaterEqual:
 		{
-			return lType == Type::Int ? builder->CreateICmpUGE(left, right, "cmptmp") :
+			return lType->isInt() ? builder->CreateICmpUGE(left, right, "cmptmp") :
 				builder->CreateFCmpUGE(left, right, "cmptmp");
 		}
 	}
@@ -228,10 +211,10 @@ llvm::Value* Binary::Generate()
 	if (right->type != left->type)
 		throw CompileError("Both operands of a binary operation must be of the same type");
 
-	if (right->type == (Type)0 || left->type == (Type)0)
+	if (!right->type || !left->type)
 		throw CompileError("Invalid operands for binary operation");
 
-	Type lType = left->type;
+	Type* lType = left->type;
 	
 	llvm::Value* value = CreateBinOp(lhs, rhs, binaryType, lType, lFlags, rFlags);
 	if (!value)
@@ -284,22 +267,10 @@ llvm::Value* Branch::Generate()
 	return branch;
 }
 
-static const char* LLVMTypeStringFromType(Type type)
-{
-	switch (type)
-	{
-	case Type::Int:     return "i32";
-	case Type::Float:   return "float";
-	case Type::Boolean: return "i1";
-	default:
-		throw CompileError("Invalid function call argument type");
-	}
-}
-
 static void MangleFunctionName(std::string& name, const std::vector<FunctionDefinition::Parameter>& params)
 {
 	for (auto& param : params)
-		name += LLVMTypeStringFromType(param.type);
+		name += param.type->name;
 }
 
 llvm::Value* Call::Generate()
@@ -307,7 +278,7 @@ llvm::Value* Call::Generate()
 	// Mangle the function call name
 	for (auto& arg : args)
 	{
-		fnName += LLVMTypeStringFromType(arg->type);
+		fnName += arg->type->name;
 	}
 
 	// Look up function name
@@ -368,10 +339,10 @@ llvm::Value* FunctionDefinition::Generate()
 		// Fill paramTypes with proper types
 		int index = 0;
 		for (auto& param : params)
-			paramTypes[index++] = GetLLVMType(param.type);
+			paramTypes[index++] = param.type->raw;
 		index = 0; // Reuse later
 
-		llvm::Type* returnType = GetLLVMType(type);
+		llvm::Type* returnType = type->raw;
 
 		if (!returnType)
 			throw CompileError("Invalid return type for '%s'", name.c_str());
@@ -427,6 +398,15 @@ llvm::Value* FunctionDefinition::Generate()
 	return function;
 }
 
+llvm::Value* StructureDefinition::Generate()
+{
+	Assert(members.size(), "Structs must own at least one member");
+
+	// Type already resolved
+
+	return nullptr;
+}
+
 Generator::Generator()
 {
 	context = std::make_unique<llvm::LLVMContext>();
@@ -434,26 +414,66 @@ Generator::Generator()
 	builder = std::make_unique<llvm::IRBuilder<>>(*context);
 }
 
-std::string Generator::Generate(std::unique_ptr<Compound> compound)
+static void ResolveType(UserDefinedType* type)
 {
+	std::vector<llvm::Type*> memberTypesForLLVM;
+	memberTypesForLLVM.resize(type->memberTypes.size());
+	
+	// TODO: non-primitive member types for structures
+	int index = 0;
+	for (Type* utype : type->memberTypes)
+		memberTypesForLLVM[index++] = utype->raw;
+
+	type->raw = llvm::StructType::create(*context, memberTypesForLLVM, type->name, false);
+}
+
+static void ResolveParsedTypes(ParseResult& result)
+{
+	// Resolve the primitive types
+	{
+		Type::int32Type->raw  = llvm::Type::getInt32Ty(*context);
+		Type::floatType->raw  = llvm::Type::getFloatPtrTy(*context);
+		Type::boolType->raw   = llvm::Type::getInt1Ty(*context);
+		Type::stringType->raw = llvm::Type::getInt1PtrTy(*context);
+		Type::voidType->raw   = llvm::Type::getVoidTy(*context);
+	}
+
+	// Resolve non-primitives
+	for (Type* type : Typer::GetAll())
+	{
+		if (!type->isPrimitive())
+		{
+			ResolveType(static_cast<UserDefinedType*>(type));
+		}
+	}
+}
+
+CompileResult Generator::Generate(ParseResult& parseResult)
+{
+	CompileResult result;
+
 	try
 	{
-		for (auto& child : compound->statements)
+		ResolveParsedTypes(parseResult);
+
+		for (auto& child : parseResult.module->statements)
 		{
 			child->Generate();
 		}
 
-		std::string ir;
-		llvm::raw_string_ostream stream(ir);
+		llvm::raw_string_ostream stream(result.ir);
 		module->print(stream, nullptr);
-		return ir;
+		result.Succeeded = true;
 	}
 	catch (CompileError& err)
 	{
-		fprintf(stderr, "CodeGenError: %s\n\n", err.message.c_str());
+		result.Succeeded = false;
 
-		printf("IR generated:\n");
-		module->print(llvm::errs(), nullptr);
-		printf("\n");
+		fprintf(stderr, "CodeGenError: %s\n\n", err.message.c_str());
+		//printf("IR generated:\n");
+		//module->print(llvm::errs(), nullptr);
+		//printf("\n");
 	}
+
+	return result;
 }

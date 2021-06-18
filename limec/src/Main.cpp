@@ -4,7 +4,6 @@
 
 #include "Tree.h"
 
-#include "Parser.h"
 #include "Generator.h"
 #include "Emitter.h"
 
@@ -59,16 +58,20 @@ int main(int argc, const char* argv[])
 	if (parseResult.Succeeded)
 	{
 		Generator generator;
-		std::string ir = generator.Generate(std::move(parseResult.module));
+		auto result = generator.Generate(parseResult);
+
+		if (!result.Succeeded)
+			return 0;
 
 		Emitter emitter;
-		emitter.Emit(ir, "result.ll");
+		emitter.Emit(result.ir, "result.ll");
 		
 #ifdef _WIN32
-		// Generate bitcode
 		LaunchProcess("\"llvm-as\" result.ll");
-		// Generate ASM
+		// Generate obj file
 		LaunchProcess("\"llc\" result.bc");
+		// Link
+		//LaunchProcess("\"link\" result.o -defaultlib:libcmt");
 #else
 	#error "Sorry bro"
 #endif

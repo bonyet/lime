@@ -1,9 +1,17 @@
 #pragma once
 
+#include "Parser.h"
+
+struct CompileResult
+{
+	std::string ir;
+	bool Succeeded = true;
+};
+
 class Generator
 {
 public:
 	Generator();
 
-	std::string Generate(std::unique_ptr<Compound> module);
+	CompileResult Generate(ParseResult& parseResult);
 };

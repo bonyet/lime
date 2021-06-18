@@ -1,24 +1,17 @@
 // TODO:
-// References / pointers
+// References / pointers (done?)
 // Structures then classes
 // Multiple return values
 // Annotations / attributes
-// Generics
+// Templates / generics
 
-sum :: (int a, int b) -> int
+Dog :: struct
 {
-	return a + b;
+	int eyeballs;
 }
 
-sum :: (float a, float b) -> float
+main :: () -> int
 {
-	return a + b;
-}
-
-main :: ()
-{
-	mut int a = 0;
-	a = sum(a, 5);
-	mut float b = 0.0f;
-	b = sum(b, 5.0f);
+	int number;
+	return 5;
 }

@@ -1,26 +1,54 @@
+#include <string>
+
 #include "Type.h"
 #include <memory>
 
-#include <string>
 #include "Utils.h"
-
 #include "Error.h"
 
-Type TypeFromString(const char* string)
+#include "Typer.h"
+
+Type* Type::int32Type = new Type
+(
+	"int"
+);
+Type* Type::floatType = new Type
+(
+	"float"
+);
+Type* Type::boolType = new Type
+(
+	"bool"
+);
+Type* Type::stringType = new Type
+(
+	"string"
+);
+Type* Type::voidType = new Type
+(
+	"void"
+);
+
+std::vector<Type*> Typer::definedTypes =
+{
+	Type::int32Type, Type::floatType, Type::boolType, Type::stringType, Type::voidType,
+};
+
+Type* Type::FromString(const char* string)
 {
 	switch (*string)
 	{
 	case 'i':
-		return Type::Int;
+		return int32Type;
 	case 'f':
-		return Type::Float;
+		return floatType;
 	case 'b':
-		return Type::Boolean;
+		return boolType;
 	case 's':
-		return Type::String;
+		return stringType;
 	case 'v':
-		return Type::Void; // I dunno if I want to do this
+		return voidType; // Maybe not
 	}
 	
-	throw LimeError("Invalid type string");
+	return nullptr;
 }

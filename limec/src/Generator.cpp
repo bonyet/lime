@@ -11,6 +11,7 @@
 #include "Tree.h"
 #include "Typer.h"
 #include "Generator.h"
+#include "Profiler.h"
 
 static std::unique_ptr<llvm::LLVMContext> context;
 static std::unique_ptr<llvm::IRBuilder<>> builder;
@@ -43,6 +44,8 @@ llvm::Value* PrimaryValue::Generate()
 
 static void ResetStackValues()
 {
+	PROFILE_FUNCTION();
+	
 	for (auto it = namedValues.begin(); it != namedValues.end(); )
 	{
 		if (!(it->second.flags & VariableFlags_Global))
@@ -58,6 +61,8 @@ static void ResetStackValues()
 llvm::Value* VariableDefinition::Generate()
 {
 	using namespace llvm;
+	
+	PROFILE_FUNCTION();
 	
 	llvm::Type* type = this->type->raw;
 	if (scope == 0)
@@ -91,6 +96,8 @@ llvm::Value* VariableDefinition::Generate()
 llvm::Value* VariableRead::Generate()
 {
 	using namespace llvm;
+	
+	PROFILE_FUNCTION();
 
 	// TODO: enforce shadowing rules
 
@@ -104,6 +111,8 @@ llvm::Value* VariableRead::Generate()
 llvm::Value* VariableWrite::Generate()
 {
 	using namespace llvm;
+	
+	PROFILE_FUNCTION();
 
 	// TODO: enforce shadowing rules
 
@@ -120,6 +129,8 @@ static llvm::Value* CreateBinOp(llvm::Value* left, llvm::Value* right,
 	BinaryType type, Type* lType, VariableFlags lFlags, VariableFlags rFlags)
 {
 	using llvm::Instruction;
+
+	PROFILE_FUNCTION();
 
 	Instruction::BinaryOps instruction = (Instruction::BinaryOps)-1;
 	switch (type)
@@ -194,6 +205,8 @@ static llvm::Value* CreateBinOp(llvm::Value* left, llvm::Value* right,
 
 llvm::Value* Binary::Generate()
 {
+	PROFILE_FUNCTION();
+	
 	llvm::Value* lhs = left->Generate();
 	llvm::Value* rhs = right->Generate();
 
@@ -228,6 +241,8 @@ llvm::Value* Branch::Generate()
 {
 	using namespace llvm;
 
+	PROFILE_FUNCTION();
+	
 	BasicBlock* parentBlock = builder->GetInsertBlock();
 
 	BasicBlock* trueBlock = BasicBlock::Create(*context, "btrue", currentFunction);
@@ -276,6 +291,8 @@ static void MangleFunctionName(std::string& name, const std::vector<FunctionDefi
 
 llvm::Value* Call::Generate()
 {
+	PROFILE_FUNCTION();
+	
 	// Mangle the function call name
 	for (auto& arg : args)
 	{
@@ -310,6 +327,8 @@ static void GenerateEntryBlockAllocas(llvm::Function* function)
 {
 	using namespace llvm;
 
+	PROFILE_FUNCTION();
+	
 	for (auto& arg : function->args())
 	{
 		llvm::Type* type = arg.getType();
@@ -329,6 +348,8 @@ static void GenerateEntryBlockAllocas(llvm::Function* function)
 
 llvm::Value* FunctionDefinition::Generate()
 {
+	PROFILE_FUNCTION();
+	
 	MangleFunctionName(name, params);
 
 	llvm::Function* function = module->getFunction(name.c_str());
@@ -401,6 +422,8 @@ llvm::Value* FunctionDefinition::Generate()
 
 llvm::Value* StructureDefinition::Generate()
 {
+	PROFILE_FUNCTION();
+	
 	Assert(members.size(), "Structs must own at least one member");
 
 	// Type already resolved
@@ -410,6 +433,8 @@ llvm::Value* StructureDefinition::Generate()
 
 llvm::Value* MemberWrite::Generate()
 {
+	PROFILE_FUNCTION();
+	
 	NamedValue& value = namedValues[variableName];
 
 	llvm::StructType* structType = static_cast<llvm::StructType*>(value.raw->getType());
@@ -440,6 +465,8 @@ llvm::Value* MemberWrite::Generate()
 
 Generator::Generator()
 {
+	PROFILE_FUNCTION();
+	
 	context = std::make_unique<llvm::LLVMContext>();
 	module = std::make_unique<llvm::Module>(llvm::StringRef(), *context);
 	builder = std::make_unique<llvm::IRBuilder<>>(*context);
@@ -447,6 +474,8 @@ Generator::Generator()
 
 static void ResolveType(UserDefinedType* type)
 {
+	PROFILE_FUNCTION();
+	
 	std::vector<llvm::Type*> memberTypesForLLVM;
 	memberTypesForLLVM.resize(type->memberTypes.size());
 	
@@ -460,6 +489,8 @@ static void ResolveType(UserDefinedType* type)
 
 static void ResolveParsedTypes(ParseResult& result)
 {
+	PROFILE_FUNCTION();
+	
 	// Resolve the primitive types
 	{
 		Type::int32Type->raw  = llvm::Type::getInt32Ty(*context);
@@ -481,6 +512,8 @@ static void ResolveParsedTypes(ParseResult& result)
 
 CompileResult Generator::Generate(ParseResult& parseResult)
 {
+	PROFILE_FUNCTION();
+	
 	CompileResult result;
 
 	try
@@ -501,9 +534,6 @@ CompileResult Generator::Generate(ParseResult& parseResult)
 		result.Succeeded = false;
 
 		fprintf(stderr, "CodeGenError: %s\n\n", err.message.c_str());
-		//printf("IR generated:\n");
-		//module->print(llvm::errs(), nullptr);
-		//printf("\n");
 	}
 
 	return result;

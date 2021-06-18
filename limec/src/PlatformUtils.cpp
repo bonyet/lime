@@ -1,6 +1,7 @@
 #pragma once
 
 #include "PlatformUtils.h"
+#include "Profiler.h"
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -8,6 +9,8 @@
 
 inline void Win32LaunchProcess(LPWSTR argv)
 {
+	PROFILE_FUNCTION();
+
 	// additional information
 	STARTUPINFO si;
 	PROCESS_INFORMATION pi;
@@ -38,6 +41,8 @@ inline void Win32LaunchProcess(LPWSTR argv)
 
 void LaunchProcess(const char* args)
 {
+	PROFILE_FUNCTION();
+
 #ifdef _WIN32
 	size_t argLength = strlen(args) + 1;
 	

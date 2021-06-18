@@ -4,6 +4,7 @@
 #include "Utils.h"
 
 #include "Error.h"
+#include "Profiler.h"
 
 static Lexer* lexer;
 
@@ -53,6 +54,8 @@ static void SkipComment()
 
 static void SkipWhitespace()
 {
+	PROFILE_FUNCTION();
+	
 	SkipComment();
 
 	while (IsWhitespace(*lexer->current))
@@ -69,6 +72,8 @@ static void SkipWhitespace()
 
 static Token MakeIdentifier()
 {
+	PROFILE_FUNCTION();
+	
 	// Advance through identifier name
 	while (IsAlpha(Peek()) || IsDigit(Peek()))
 		Advance(1);
@@ -85,6 +90,8 @@ static Token MakeIdentifier()
 
 static Token MakeNumber()
 {
+	PROFILE_FUNCTION();
+		
 	// Advance through digits
 	while (IsDigit(Peek()) || Peek() == '.' || Peek() == 'f')
 	{
@@ -103,6 +110,8 @@ static Token MakeNumber()
 
 static Token StringToken()
 {
+	PROFILE_FUNCTION();
+
 	Advance(1);
 
 	lexer->start = lexer->current; // Manually do this to exclude quotations
@@ -158,6 +167,8 @@ static bool CheckKeyword(const char* keyword, int length)
 
 static void ProcessToken(Token* token)
 {
+	PROFILE_FUNCTION();
+
 	SkipWhitespace();
 
 	switch (*lexer->current)
@@ -395,6 +406,8 @@ static void ProcessToken(Token* token)
 
 Token Lexer::Next()
 {
+	PROFILE_FUNCTION();
+
 	// Advance
 	SkipWhitespace();
 

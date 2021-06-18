@@ -36,6 +36,8 @@ static std::string ReadFile(const char* filepath)
 
 int main(int argc, const char* argv[])
 {
+	PROFILE_BEGIN_SESSION("Profile", "ProfileResult.json");
+
 	// If we are running from the cmd line:
 #if 0
 	if (argc == 1)
@@ -77,4 +79,6 @@ int main(int argc, const char* argv[])
 	#error "Sorry bro"
 #endif
 	}
+
+	PROFILE_END_SESSION();
 }

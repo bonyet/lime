@@ -5,6 +5,7 @@
 #include "Tree.h"
 #include "Typer.h"
 #include "Parser.h"
+#include "Profiler.h"
 
 #include <unordered_map>
 #include "Scope.h"
@@ -75,6 +76,8 @@ static bool VariableExistsInScope(const std::string& name, Scope* scope = nullpt
 template<typename As = Type>
 static As* GetType(const std::string& typeName)
 {
+	PROFILE_FUNCTION();
+
 	// Check if it's a reserved type
 	const int numReservedIds = sizeof(reservedIdentifiers) / sizeof(const char*);
 	for (int i = 0; i < numReservedIds; i++)
@@ -185,6 +188,8 @@ static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement();
 
 static unique_ptr<Expression> ParseExpression(int priority) 
 {
+	PROFILE_FUNCTION();
+
 	bool isExpression = parser->state == ParseState::Expression;
 
 	OrState(ParseState::Expression);
@@ -222,6 +227,8 @@ static unique_ptr<Expression> ParseExpression(int priority)
 
 static unique_ptr<Expression> ParseUnaryExpression()
 {
+	PROFILE_FUNCTION();
+
 	Token* token = &parser->current;
 
 	// Handle groupings
@@ -286,6 +293,8 @@ static unique_ptr<Expression> ParseUnaryExpression()
 
 static unique_ptr<Expression> ParseReturnStatement()
 {
+	PROFILE_FUNCTION();
+
 	auto returnExpr = make_unique<Return>();
 	returnExpr->expression = ParseExpression(-1);
 
@@ -294,6 +303,8 @@ static unique_ptr<Expression> ParseReturnStatement()
 
 static unique_ptr<Expression> ParsePrimaryExpression()
 {
+	PROFILE_FUNCTION();
+
 	Token token = parser->current;
 	
 	switch (token.type)
@@ -371,6 +382,8 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 
 static unique_ptr<Statement> ParseExpressionStatement()
 {
+	PROFILE_FUNCTION();
+
 	unique_ptr<Statement> statement = ParseExpression(-1);
 	Expect(TokenType::Semicolon, "Expected ';' after expression");
 
@@ -379,6 +392,8 @@ static unique_ptr<Statement> ParseExpressionStatement()
 
 static unique_ptr<Expression> ParseFunctionDeclaration(Token* nameToken)
 {
+	PROFILE_FUNCTION();
+
 	auto function = make_unique<FunctionDefinition>();
 
 	// Find name
@@ -461,6 +476,8 @@ static unique_ptr<Expression> ParseFunctionDeclaration(Token* nameToken)
 
 static unique_ptr<Expression> ParseFunctionCall()
 {
+	PROFILE_FUNCTION();
+
 	// Whether or not this function call is being used as an argument in another function call (nested?)
 	bool isArgument    = parser->state & ParseState::FuncCallArgs;
 	bool isInitializer = parser->state & ParseState::VariableWrite;
@@ -499,6 +516,8 @@ static unique_ptr<Expression> ParseFunctionCall()
 
 static unique_ptr<Expression> ParseVariableExpression()
 {
+	PROFILE_FUNCTION();
+
 	Token* current = &parser->current;
 
 	auto variable = make_unique<VariableRead>();
@@ -512,6 +531,8 @@ static unique_ptr<Expression> ParseVariableExpression()
 
 static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
 {
+	PROFILE_FUNCTION();
+
 	VariableFlags flags = VariableFlags_Immutable; // Immutable by default
 
 	// We start at the type (`int`, `float`, etc)
@@ -562,11 +583,15 @@ static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
 
 static unique_ptr<Statement> ParseMemberAccessStatement()
 {
+	PROFILE_FUNCTION();
+
 
 }
 
 static unique_ptr<Statement> ParseVariableStatement()
 {
+	PROFILE_FUNCTION();
+
 	Token* current = &parser->current;
 
 	std::string name = std::string(current->start, current->length);
@@ -621,6 +646,8 @@ static unique_ptr<Statement> ParseVariableStatement()
 
 static unique_ptr<Statement> ParseBranchStatement()
 {
+	PROFILE_FUNCTION();
+
 	Token* current = &parser->current;
 
 	auto statement = make_unique<Branch>();
@@ -669,6 +696,8 @@ static unique_ptr<Statement> ParseBranchStatement()
 
 static unique_ptr<Statement> ParseStructureDeclaration(Token* nameToken)
 {
+	PROFILE_FUNCTION();
+
 	// Start at struct keyword
 
 	auto structure = make_unique<StructureDefinition>();
@@ -700,6 +729,8 @@ static unique_ptr<Statement> ParseStructureDeclaration(Token* nameToken)
 
 static unique_ptr<Statement> ParseStatement()
 {
+	PROFILE_FUNCTION();
+
 	Token* token = &parser->current;
 
 	switch (token->type)
@@ -744,6 +775,8 @@ static unique_ptr<Statement> ParseStatement()
 
 static unique_ptr<Statement> ParseCompoundStatement()
 {
+	PROFILE_FUNCTION();
+
 	Expect(TokenType::LeftCurlyBracket, "Expect '{' to begin compound statement");
 
 	DeepenScope();
@@ -766,6 +799,8 @@ static unique_ptr<Statement> ParseCompoundStatement()
 // Parses an entire file
 static unique_ptr<Compound> ParseModule()
 {
+	PROFILE_FUNCTION();
+
 	auto compound = make_unique<Compound>();
 
 	Token* token = &parser->current;
@@ -779,6 +814,8 @@ static unique_ptr<Compound> ParseModule()
 
 ParseResult Parser::Parse(Lexer* lexer)
 {
+	PROFILE_FUNCTION();
+
 	ParseResult result{};
 
 	try

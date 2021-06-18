@@ -13,5 +13,7 @@ Dog :: struct
 main :: () -> int
 {
 	Dog dog;
+	dog.eyeballs = 5;
+
 	return 5;
 }

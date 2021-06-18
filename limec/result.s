@@ -18,6 +18,7 @@ main:                                   # @main
 	pushq	%rax
 	.seh_stackalloc 8
 	.seh_endprologue
+	movl	$5, (%rsp)
 	movl	$5, %eax
 	popq	%rcx
 	retq

@@ -560,25 +560,54 @@ static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
 	return variable;
 }
 
+static unique_ptr<Statement> ParseMemberAccessStatement()
+{
+
+}
+
 static unique_ptr<Statement> ParseVariableStatement()
 {
 	Token* current = &parser->current;
 
 	std::string name = std::string(current->start, current->length);
 
+	// Creation of variable
 	if (!VariableExistsInScope(name))
-	{
 		return ParseVariableDeclarationStatement();
-	}
 
 	Type* type = GetVariableType(name);
+
+	if (parser->lexer->nextToken.type == TokenType::Dot)
+	{
+		Advance(); // To .
+		Advance(); // Through .
+
+		std::string memberName = std::string(current->start, current->length);
+
+		Advance(); // Through id
+
+		// Advance through the = if there is one
+		if (current->type == TokenType::Equal)
+			Advance();
+
+		auto statement = make_unique<MemberWrite>();
+		statement->variableName = name;
+		statement->memberName = memberName;
+		statement->right = ParseExpression(-1);
+		statement->type = type;
+
+		Expect(TokenType::Semicolon, "Expected ';' after statement");
+
+		return statement;
+	}
 
 	auto variable = make_unique<VariableWrite>();
 	variable->name = name;
 	variable->type = type;
 
 	Advance(); // Through identifier
-	Advance(); // Through operator
+
+	Advance(); // Through =
 
 	auto previousState = parser->state;
 	OrState(ParseState::VariableWrite);

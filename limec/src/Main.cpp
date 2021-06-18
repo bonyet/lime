@@ -6,6 +6,7 @@
 
 #include "Generator.h"
 #include "Emitter.h"
+#include "Profiler.h"
 
 #include <fstream>
 

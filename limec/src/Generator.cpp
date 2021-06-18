@@ -22,6 +22,7 @@ static llvm::Function* currentFunction = nullptr;
 struct NamedValue
 {
 	llvm::Value* raw = nullptr;
+	llvm::Type* type = nullptr;
 	VariableFlags flags = VariableFlags_None;
 };
 
@@ -69,14 +70,14 @@ llvm::Value* VariableDefinition::Generate()
 		if (initializer)
 			gVar->setInitializer((Constant*)initializer->Generate());
 
-		namedValues[name] = { gVar, flags };
+		namedValues[name] = { gVar, type, flags };
 
 		return gVar;
 	}
 
 	// Allocate on the stack
 	AllocaInst* allocaInst = builder->CreateAlloca(type, nullptr, name);
-	namedValues[name] = { allocaInst, flags };
+	namedValues[name] = { allocaInst, type, flags };
 
 	if (initializer)
 	{
@@ -322,7 +323,7 @@ static void GenerateEntryBlockAllocas(llvm::Function* function)
 		name.pop_back(); // Remove arg suffix
 
 		AllocaInst* allocaInst = builder->CreateAlloca(type, nullptr, name);
-		namedValues[name] = { allocaInst, VariableFlags_None };
+		namedValues[name] = { allocaInst, type, VariableFlags_None };
 	}
 }
 
@@ -405,6 +406,36 @@ llvm::Value* StructureDefinition::Generate()
 	// Type already resolved
 
 	return nullptr;
+}
+
+llvm::Value* MemberWrite::Generate()
+{
+	NamedValue& value = namedValues[variableName];
+
+	llvm::StructType* structType = static_cast<llvm::StructType*>(value.raw->getType());
+
+	int elementIndex = -1, index = 0;
+	for (llvm::Type* memberType : structType->elements()) 
+	{
+		if (memberType == type->raw)
+		{
+			elementIndex = index;
+			break;
+		}
+
+		index++;
+	}
+
+	std::array<llvm::Value*, 2> indices
+	{
+		llvm::ConstantInt::get(*context, llvm::APInt(32, 0, true)),
+		llvm::ConstantInt::get(*context, llvm::APInt(32, elementIndex, true)),
+	};
+
+	llvm::Value* pRetrievedValue = builder->CreateGEP(type->raw, value.raw, indices, "geptmp");
+
+	// Modify
+	return builder->CreateStore(right->Generate(), pRetrievedValue);
 }
 
 Generator::Generator()

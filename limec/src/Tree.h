@@ -169,10 +169,23 @@ struct StructureDefinition : public Statement
 	llvm::Value* Generate() override;
 };
 
+struct MemberRead : public Expression
+{
+	std::string memberName;
+};
+
 struct VariableRead : public Expression
 {
 	std::string name;
 
+	llvm::Value* Generate() override;
+};
+
+struct MemberWrite : public Expression
+{
+	std::string variableName, memberName;
+	std::unique_ptr<Expression> right;
+	
 	llvm::Value* Generate() override;
 };
 

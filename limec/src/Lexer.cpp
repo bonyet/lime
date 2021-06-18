@@ -286,15 +286,6 @@ static void ProcessToken(Token* token)
 		}
 		break;
 	}
-	case 'b':
-	{
-		if (CheckKeyword("bool", 4))
-		{
-			*token = MakeToken(TokenType::Bool, 4);
-			return;
-		}
-		break;
-	}
 	case 'c':
 	{
 		if (CheckKeyword("class", 5))
@@ -315,12 +306,7 @@ static void ProcessToken(Token* token)
 	}
 	case 'f':
 	{
-		if (CheckKeyword("float", 5))
-		{
-			*token = MakeToken(TokenType::Float, 5);
-			return;
-		}
-		else if (CheckKeyword("false", 5))
+		if (CheckKeyword("false", 5))
 		{
 			*token = MakeToken(TokenType::False, 5);
 			return;
@@ -329,11 +315,6 @@ static void ProcessToken(Token* token)
 	}
 	case 'i':
 	{
-		if (CheckKeyword("int", 3))
-		{
-			*token = MakeToken(TokenType::Int, 3);
-			return;
-		}
 		if (CheckKeyword("if", 2))
 		{
 			*token = MakeToken(TokenType::If, 2);

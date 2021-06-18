@@ -5,12 +5,12 @@ class Typer
 public:
 	static std::vector<Type*> definedTypes;
 
-	template<typename T, typename... Args>
-	static T* Add(Args&&... args)
+	template<typename T>
+	static T* Add(const std::string& typeName)
 	{
 		static_assert(std::is_base_of<Type, T>::value, "Cannot resolve type");
 
-		definedTypes.push_back(new T(std::forward<Args>(args)...));
+		definedTypes.push_back(new T(typeName));
 		return static_cast<T*>(definedTypes.back());
 	}
 
@@ -18,10 +18,7 @@ public:
 	{
 		Type* result = nullptr;
 		if (!Valid(typeName, &result))
-		{
-			printf("Type '%s' not registered\n", typeName.c_str());
-			return definedTypes.front();
-		}
+			throw LimeError("Type '%s' not registered\n", typeName.c_str());
 
 		return result;
 	}

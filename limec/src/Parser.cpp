@@ -1,9 +1,10 @@
 #include <llvm/IR/Value.h>
+
+#include "Error.h"
+
 #include "Tree.h"
 #include "Typer.h"
 #include "Parser.h"
-
-#include "Error.h"
 
 #include <unordered_map>
 #include "Scope.h"
@@ -14,6 +15,11 @@ using std::unique_ptr;
 using std::make_unique;
 
 #define Assert(cond, msg, ...) { if (!(cond)) { throw LimeError(msg, __VA_ARGS__); } }
+
+static const const char* reservedIdentifiers[] =
+{
+	"int", "float", "bool", "string", "void"
+};
 
 static std::vector<Scope> scopes =
 {
@@ -69,6 +75,14 @@ static bool VariableExistsInScope(const std::string& name, Scope* scope = nullpt
 template<typename As = Type>
 static As* GetType(const std::string& typeName)
 {
+	// Check if it's a reserved type
+	const int numReservedIds = sizeof(reservedIdentifiers) / sizeof(const char*);
+	for (int i = 0; i < numReservedIds; i++)
+	{
+		if (typeName == reservedIdentifiers[i])
+			return static_cast<As*>(Typer::Get(typeName));
+	}
+
 	for (Type* type : Typer::GetAll())
 	{
 		if (type->name == typeName)
@@ -496,30 +510,6 @@ static unique_ptr<Expression> ParseVariableExpression()
 	return variable;
 }
 
-static unique_ptr<Statement> ParseVariableStatement()
-{
-	Token* current = &parser->current;
-
-	std::string name = std::string(current->start, current->length);
-	Type* type = GetVariableType(name);
-
-	auto variable = make_unique<VariableWrite>();
-	variable->name = name;
-	variable->type = type;
-
-	Advance(); // Through identifier
-	Advance(); // Through operator
-
-	auto previousState = parser->state;
-	OrState(ParseState::VariableWrite);
-	variable->right = ParseExpression(-1);
-	parser->state = previousState;
-
-	Expect(TokenType::Semicolon, "Expected ';' after statement");
-
-	return variable;
-}
-
 static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
 {
 	VariableFlags flags = VariableFlags_Immutable; // Immutable by default
@@ -558,7 +548,7 @@ static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
 		OrState(ParseState::VariableWrite);
 
 		Advance(); // Through =
-		
+
 		// Parse initializer
 		variable->initializer = ParseExpression(-1);
 
@@ -566,6 +556,36 @@ static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
 
 		ResetState();
 	}
+
+	return variable;
+}
+
+static unique_ptr<Statement> ParseVariableStatement()
+{
+	Token* current = &parser->current;
+
+	std::string name = std::string(current->start, current->length);
+
+	if (!VariableExistsInScope(name))
+	{
+		return ParseVariableDeclarationStatement();
+	}
+
+	Type* type = GetVariableType(name);
+
+	auto variable = make_unique<VariableWrite>();
+	variable->name = name;
+	variable->type = type;
+
+	Advance(); // Through identifier
+	Advance(); // Through operator
+
+	auto previousState = parser->state;
+	OrState(ParseState::VariableWrite);
+	variable->right = ParseExpression(-1);
+	parser->state = previousState;
+
+	Expect(TokenType::Semicolon, "Expected ';' after statement");
 
 	return variable;
 }
@@ -657,11 +677,7 @@ static unique_ptr<Statement> ParseStatement()
 	{
 	case TokenType::LeftCurlyBracket:
 		return ParseCompoundStatement();
-	case TokenType::Int:
-	case TokenType::Float:
-	case TokenType::Bool:
 	case TokenType::Mut:
-		return ParseVariableDeclarationStatement();
 	case TokenType::ID:
 	{
 		Token* next = &parser->lexer->nextToken;

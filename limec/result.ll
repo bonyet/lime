@@ -1,6 +1,8 @@
 
+%Dog = type { i32 }
+
 define i32 @main() {
 entry:
-  %number = alloca i32, align 4
+  %dog = alloca %Dog, align 8
   ret i32 5
 }

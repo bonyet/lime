@@ -38,10 +38,9 @@ struct Type
 struct UserDefinedType : public Type
 {
 public:
-	std::string name;
 	std::vector<Type*> memberTypes;
 
 	UserDefinedType() = default;
 	UserDefinedType(const std::string& name)
-		: name(name) {}
+		: Type(name) {}
 };

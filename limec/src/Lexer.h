@@ -22,7 +22,6 @@ enum class TokenType : char
 	// Keywords
 	And, Or, If, Else,
 	True, False,
-	Int, Float, Bool,
 	Return, Mut,
 	Struct, Class,
 

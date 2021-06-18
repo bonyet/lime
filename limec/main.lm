@@ -12,6 +12,6 @@ Dog :: struct
 
 main :: () -> int
 {
-	int number;
+	Dog dog;
 	return 5;
 }

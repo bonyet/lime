@@ -29,6 +29,8 @@ struct NamedValue
 
 static std::unordered_map<std::string, NamedValue> namedValues;
 
+static std::unordered_map<llvm::StructType*, std::vector<std::string>> structureTypeMemberNames;
+
 llvm::Value* PrimaryValue::Generate()
 {
 	switch (type->name[0])
@@ -283,22 +285,10 @@ llvm::Value* Branch::Generate()
 	return branch;
 }
 
-static void MangleFunctionName(std::string& name, const std::vector<FunctionDefinition::Parameter>& params)
-{
-	for (auto& param : params)
-		name += param.type->name;
-}
-
 llvm::Value* Call::Generate()
 {
 	PROFILE_FUNCTION();
 	
-	// Mangle the function call name
-	for (auto& arg : args)
-	{
-		fnName += arg->type->name;
-	}
-
 	// Look up function name
 	llvm::Function* func = module->getFunction(fnName);
 	if (!func)
@@ -349,9 +339,7 @@ static void GenerateEntryBlockAllocas(llvm::Function* function)
 llvm::Value* FunctionDefinition::Generate()
 {
 	PROFILE_FUNCTION();
-	
-	MangleFunctionName(name, params);
-
+	 
 	llvm::Function* function = module->getFunction(name.c_str());
 	// Create function if it doesn't exist
 	if (!function)
@@ -362,7 +350,7 @@ llvm::Value* FunctionDefinition::Generate()
 		int index = 0;
 		for (auto& param : params)
 			paramTypes[index++] = param.type->raw;
-		index = 0; // Reuse later
+		index = 0;
 
 		llvm::Type* returnType = type->raw;
 
@@ -378,43 +366,50 @@ llvm::Value* FunctionDefinition::Generate()
 			arg.setName(params[index++].name + '_'); // Suffix arguments with '_' to make stuff work
 		}
 	}
-	if (!function->empty())
-	{
-		throw CompileError("Function cannot be redefined");
-	}
 
-	currentFunction = function;	
+	if (!function->empty())
+		throw CompileError("Function cannot be redefined");
+
+	currentFunction = function;
 
 	// Create block to start insertion into
 	llvm::BasicBlock* block = llvm::BasicBlock::Create(*context, "entry", function);
 	builder->SetInsertPoint(block);
 
-	// Allocate args
+	// Allocate args on the stack
 	namedValues.clear();
 	GenerateEntryBlockAllocas(function);
 
-	// Generate body
-	int index = 0;
-	for (auto& statement : body)
 	{
-		if (index++ == indexOfReturnInBody)
-			continue; // Don't generate return statements twice
+		PROFILE_SCOPE("Generate body :: FunctionDefinition::Generate()");
+		
+		// Generate body
+		int index = 0;
+		for (auto& statement : body)
+		{
+			if (index++ == indexOfReturnInBody)
+				continue; // Don't generate return statements twice
 
-		statement->Generate();
+			statement->Generate();
+		}
 	}
 
-	// Return value
+	// Handle the return value
 	llvm::Value* returnValue = indexOfReturnInBody != -1 ? (llvm::Value*)body[indexOfReturnInBody]->Generate() : nullptr;
 	builder->CreateRet(returnValue);
 
-	if (verifyFunction(*function, &llvm::errs()))
 	{
-		printf("\nIR so far:\n");
-		module->print(llvm::errs(), nullptr);
-		printf("\n");
+		PROFILE_SCOPE("Verify function :: FunctionDefinition::Generate()");
 
-		function->eraseFromParent();
-		printf("\n");
+		if (verifyFunction(*function, &llvm::errs()))
+		{
+			printf("\nIR so far:\n");
+			module->print(llvm::errs(), nullptr);
+			printf("\n");
+
+			function->eraseFromParent();
+			printf("\n");
+		}
 	}
 
 	return function;
@@ -431,33 +426,74 @@ llvm::Value* StructureDefinition::Generate()
 	return nullptr;
 }
 
-llvm::Value* MemberWrite::Generate()
+llvm::Value* MemberRead::Generate()
 {
 	PROFILE_FUNCTION();
-	
-	NamedValue& value = namedValues[variableName];
 
-	llvm::StructType* structType = static_cast<llvm::StructType*>(value.raw->getType());
+	NamedValue& structure = namedValues[variableName];
 
-	int elementIndex = -1, index = 0;
-	for (llvm::Type* memberType : structType->elements()) 
+	UserDefinedType* userStructureType = static_cast<UserDefinedType*>(Typer::Get(variableTypename));
+
+	int structureIndex = -1;
 	{
-		if (memberType == type->raw)
+		int index = 0;
+		for (auto& pair : userStructureType->members)
 		{
-			elementIndex = index;
-			break;
-		}
+			if (pair.first == memberName)
+			{
+				structureIndex = index;
+				break;
+			}
 
-		index++;
+			index++;
+		}
 	}
+	Assert(structureIndex >= 0, "Invalid member for structure");
 
 	std::array<llvm::Value*, 2> indices
 	{
 		llvm::ConstantInt::get(*context, llvm::APInt(32, 0, true)),
-		llvm::ConstantInt::get(*context, llvm::APInt(32, elementIndex, true)),
+		llvm::ConstantInt::get(*context, llvm::APInt(32, structureIndex, true)),
 	};
 
-	llvm::Value* pRetrievedValue = builder->CreateGEP(type->raw, value.raw, indices, "geptmp");
+	llvm::Value* pRetrievedValue = builder->CreateGEP(type->raw, structure.raw, indices, "geptmp");
+
+
+	// Modify
+	return builder->CreateLoad(pRetrievedValue, "loadtmp");
+}
+
+llvm::Value* MemberWrite::Generate()
+{
+	PROFILE_FUNCTION();
+	
+	NamedValue& structure = namedValues[variableName];
+
+	UserDefinedType* userStructureType = static_cast<UserDefinedType*>(Typer::Get(variableTypename));
+	
+	int structureIndex = -1;
+	{
+		int index = 0;
+		for (auto& pair : userStructureType->members)
+		{
+			if (pair.first == memberName)
+			{
+				structureIndex = index;
+				break;
+			}
+
+			index++;
+		}
+	}
+	Assert(structureIndex >= 0, "Invalid member for structure");
+
+	std::array<llvm::Value*, 2> indices
+	{
+		llvm::ConstantInt::get(*context, llvm::APInt(32, 0, true)),
+		llvm::ConstantInt::get(*context, llvm::APInt(32, structureIndex, true)),
+	};
+
+	llvm::Value* pRetrievedValue = builder->CreateGEP(type->raw, structure.raw, indices, "geptmp");
 
 	// Modify
 	return builder->CreateStore(right->Generate(), pRetrievedValue);
@@ -477,12 +513,12 @@ static void ResolveType(UserDefinedType* type)
 	PROFILE_FUNCTION();
 	
 	std::vector<llvm::Type*> memberTypesForLLVM;
-	memberTypesForLLVM.resize(type->memberTypes.size());
+	memberTypesForLLVM.resize(type->members.size());
 	
 	// TODO: non-primitive member types for structures
 	int index = 0;
-	for (Type* utype : type->memberTypes)
-		memberTypesForLLVM[index++] = utype->raw;
+	for (auto& memberType : type->members)
+		memberTypesForLLVM[index++] = memberType.second->raw;
 
 	type->raw = llvm::StructType::create(*context, memberTypesForLLVM, type->name, false);
 }

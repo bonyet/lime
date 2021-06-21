@@ -10,10 +10,21 @@ Dog :: struct
 	int eyeballs;
 }
 
+test :: (int eyeballs)
+{
+}
+
 main :: () -> int
 {
 	Dog dog;
-	dog.eyeballs = 5;
+	dog.eyeballs = 5 + 10;
+	int i = dog.eyeballs;
+	test(dog.eyeballs);
+
+	dog.eyeballs = 0;
+	i = 10;
+
+	dog.eyeballs = dog.eyeballs + 5;
 
 	return 5;
 }

@@ -29,8 +29,6 @@ struct Type
 		return isInt() || isFloat() || isString() || isBool() || isVoid();
 	}
 
-	static Type* FromString(const char* string);
-
 	friend class Typer;
 	friend struct UserDefinedType;
 }; 
@@ -38,7 +36,7 @@ struct Type
 struct UserDefinedType : public Type
 {
 public:
-	std::vector<Type*> memberTypes;
+	std::vector<std::pair<std::string, Type*>> members;
 
 	UserDefinedType() = default;
 	UserDefinedType(const std::string& name)

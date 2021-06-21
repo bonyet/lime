@@ -22,17 +22,9 @@ static const const char* reservedIdentifiers[] =
 	"int", "float", "bool", "string", "void"
 };
 
-static std::vector<Scope> scopes =
-{
-	{ }
-};
+static std::vector<Scope> scopes = { { } };
 
-int LimeError::GetLine()
-{
-	return parser->lexer->line;
-}
-
-static Token Advance()
+static Token Advance() 
 {
 	return (parser->current = parser->lexer->Next());
 }
@@ -183,6 +175,7 @@ static unique_ptr<Expression> ParseUnaryExpression();
 static unique_ptr<Statement>  ParseCompoundStatement();
 static unique_ptr<Expression> ParsePrimaryExpression();
 static unique_ptr<Expression> ParseVariableExpression();
+static unique_ptr<Expression> ParseMemberAccessExpression();
 static unique_ptr<Expression> ParseFunctionDeclaration(Token* current);
 static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement();
 
@@ -314,9 +307,9 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 			Token* next = &parser->lexer->nextToken;
 
 			if (next->type == TokenType::LeftParen)
-			{
 				return ParseFunctionCall();
-			}
+			else if (next->type == TokenType::Dot)
+				return ParseMemberAccessExpression();
 
 			return ParseVariableExpression();
 		}
@@ -416,11 +409,13 @@ static unique_ptr<Expression> ParseFunctionDeclaration(Token* nameToken)
 
 		Advance(); // Through type
 
-		if (current->type == TokenType::Ampersand)
+		if (current->type == TokenType::Star)
 		{
-			// By reference
-			param.flags |= VariableFlags_Reference;
-			Advance(); // Through & 
+			assert(false);
+			// Pointer
+			param.flags |= VariableFlags_Pointer;
+
+			Advance(); // Through *
 		}
 
 		param.name = std::string(current->start, current->length);
@@ -520,13 +515,29 @@ static unique_ptr<Expression> ParseVariableExpression()
 
 	Token* current = &parser->current;
 
-	auto variable = make_unique<VariableRead>();
-	variable->name = std::string(current->start, current->length);
-	variable->type = GetVariableType(variable->name);
+	if (parser->lexer->nextToken.type == TokenType::Dot)
+	{
+		// TODO: defer type resolution until second pass?
+		auto member = make_unique<MemberRead>();
 
-	Advance(); // Through identifier
+		// Accessing a structure member
+		Advance(); // To .
+		Advance(); // Through .
 
-	return variable;
+		member->memberName = std::string(current->start, current->length);
+
+		return member;
+	}
+	else
+	{
+		auto variable = make_unique<VariableRead>();
+		variable->name = std::string(current->start, current->length);
+		variable->type = GetVariableType(variable->name);
+
+		Advance(); // Through identifier
+
+		return variable;
+	}
 }
 
 static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
@@ -581,11 +592,31 @@ static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
 	return variable;
 }
 
-static unique_ptr<Statement> ParseMemberAccessStatement()
+static unique_ptr<Expression> ParseMemberAccessExpression()
 {
 	PROFILE_FUNCTION();
 
+	Token* current = &parser->current;
 
+	std::string variableName = std::string(current->start, current->length);
+
+	Type* type = GetVariableType(variableName);
+
+	Advance(); // Through variable name
+	Advance(); // Through .
+
+	std::string memberName = std::string(current->start, current->length);
+
+	auto expr = make_unique<MemberRead>();
+
+	expr->variableTypename = type->name;
+	expr->variableName = variableName;
+	expr->memberName = memberName;
+	expr->type = type;
+
+	Advance(); // Through identifier
+
+	return expr;
 }
 
 static unique_ptr<Statement> ParseVariableStatement()
@@ -594,13 +625,13 @@ static unique_ptr<Statement> ParseVariableStatement()
 
 	Token* current = &parser->current;
 
-	std::string name = std::string(current->start, current->length);
+	std::string variableName = std::string(current->start, current->length);
 
 	// Creation of variable
-	if (!VariableExistsInScope(name))
+	if (!VariableExistsInScope(variableName))
 		return ParseVariableDeclarationStatement();
 
-	Type* type = GetVariableType(name);
+	Type* type = GetVariableType(variableName);
 
 	if (parser->lexer->nextToken.type == TokenType::Dot)
 	{
@@ -616,8 +647,11 @@ static unique_ptr<Statement> ParseVariableStatement()
 			Advance();
 
 		auto statement = make_unique<MemberWrite>();
-		statement->variableName = name;
+
+		statement->variableTypename = type->name;
+		statement->variableName = variableName;
 		statement->memberName = memberName;
+		
 		statement->right = ParseExpression(-1);
 		statement->type = type;
 
@@ -627,7 +661,7 @@ static unique_ptr<Statement> ParseVariableStatement()
 	}
 
 	auto variable = make_unique<VariableWrite>();
-	variable->name = name;
+	variable->name = variableName;
 	variable->type = type;
 
 	Advance(); // Through identifier
@@ -716,7 +750,7 @@ static unique_ptr<Statement> ParseStructureDeclaration(Token* nameToken)
 	while (current->type != TokenType::RightCurlyBracket)
 	{
 		auto decl = ParseVariableDeclarationStatement();
-		type->memberTypes.push_back(decl->type);
+		type->members.push_back({ decl->name, decl->type });
 		structure->members.push_back(std::move(decl));
 	}
 
@@ -796,7 +830,7 @@ static unique_ptr<Statement> ParseCompoundStatement()
 	return compound;
 }
 
-// Parses an entire file
+// it just works
 static unique_ptr<Compound> ParseModule()
 {
 	PROFILE_FUNCTION();
@@ -811,6 +845,62 @@ static unique_ptr<Compound> ParseModule()
 
 	return compound;
 }
+
+#if 0
+static void DoSecondPass(std::unique_ptr<Compound>& compound)
+{
+	for (unique_ptr<Statement>& statement : compound->statements)
+	{
+		// MUST know *type name*
+
+		switch (statement->statementType)
+		{
+		case StatementType::MemberReadExpr:
+		{
+			MemberRead* pExpr = dynamic_cast<MemberRead*>(statement.get());
+			Assert(pExpr, "Invalid member expression");
+
+			UserDefinedType* structureType = nullptr;
+
+			Assert(structureType = static_cast<UserDefinedType*>(pExpr->type), "Invalid type for member write node");
+
+			int index = 0;
+			for (auto& member : structureType->members)
+			{
+				if (member.first == pExpr->memberName) {
+					pExpr->indexIntoStructure = index;
+					break;
+				}
+
+				index++;
+			}
+
+			continue;
+		}
+		case StatementType::MemberWriteExpr:
+		{
+			MemberWrite* pExpr = dynamic_cast<MemberWrite*>(statement.get());
+			UserDefinedType* structureType = nullptr;
+
+			Assert(structureType = static_cast<UserDefinedType*>(pExpr->type), "Invalid type for member write node");
+
+			int index = 0;
+			for (auto& member : structureType->members)
+			{
+				if (member.first == pExpr->memberName) {
+					pExpr->indexIntoStructure = index;
+					break;
+				}
+
+				index++;
+			}
+
+			continue;
+		}
+		}
+	}
+}
+#endif
 
 ParseResult Parser::Parse(Lexer* lexer)
 {
@@ -828,6 +918,8 @@ ParseResult Parser::Parse(Lexer* lexer)
 		
 		auto compound = ParseModule();
 		
+		//DoSecondPass(compound);
+
 		result.Succeeded = true;
 		result.module = std::move(compound);
 	}
@@ -841,3 +933,5 @@ ParseResult Parser::Parse(Lexer* lexer)
 
 	return result;
 }
+
+int LimeError::GetLine() { return parser->lexer->line; }

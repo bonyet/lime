@@ -1,6 +1,7 @@
 # Spooky secrets
 plans/*
 *.scor
+*.scor.*
 
 # User-specific files
 *.rsuser

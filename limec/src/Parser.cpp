@@ -405,20 +405,21 @@ static unique_ptr<Expression> ParseFunctionDeclaration(Token* nameToken)
 	while (current->type != TokenType::RightParen)
 	{
 		FunctionDefinition::Parameter param;
-		param.type = GetType(std::string(current->start, current->length));
+		param.name = std::string(current->start, current->length);
 
-		Advance(); // Through type
+		Advance(); // Through name
+		Expect(TokenType::Colon, "Expected ':' after parameter name"); // Through :
 
 		if (current->type == TokenType::Star)
 		{
-			assert(false);
+			throw LimeError("Pointers are not supported");
 			// Pointer
 			param.flags |= VariableFlags_Pointer;
 
 			Advance(); // Through *
 		}
 
-		param.name = std::string(current->start, current->length);
+		param.type = GetType(std::string(current->start, current->length));
 		function->params.push_back(param);
 
 		// Register to scope
@@ -546,30 +547,37 @@ static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
 
 	VariableFlags flags = VariableFlags_Immutable; // Immutable by default
 
-	// We start at the type (`int`, `float`, etc)
-	Token startToken = parser->current;
-	if (startToken.type == TokenType::Mut)
-	{
-		flags = VariableFlags_Mutable;
-		startToken = Advance(); // To type
-	}
+	// We start at the name
+	Token nameToken = parser->current;
+	//if (startToken.type == TokenType::Mut)
+	//{
+	//	flags = VariableFlags_Mutable;
+	//	startToken = Advance(); // To type
+	//}
 
 	if (parser->scopeDepth == 0)
 		flags |= VariableFlags_Global;
 
-	Token nameToken = Advance();
+	Advance(); // To :
+	if (parser->current.type == TokenType::WalrusTeeth)
+	{
+		// Automatically deduce variable type
+		throw LimeError("automatic type deduction not supported");
+	}
+
+	Token typeToken = Advance();
 
 	Advance(); // Through name
 
 	auto variable = make_unique<VariableDefinition>();
 	variable->scope = parser->scopeDepth;
 	variable->name = std::string(nameToken.start, nameToken.length);
-	variable->type = GetType(std::string(startToken.start, startToken.length));
+	variable->type = GetType(std::string(typeToken.start, typeToken.length));
 	variable->flags = flags;
 
 	RegisterVariable(variable->name, variable->type, variable->flags);
 
-	// No initializer
+	// Handle initializer if there is one
 	if (parser->current.type == TokenType::Semicolon)
 	{
 		Advance(); // Through ;
@@ -777,6 +785,11 @@ static unique_ptr<Statement> ParseStatement()
 		Token* next = &parser->lexer->nextToken;
 		switch (next->type)
 		{
+		case TokenType::WalrusTeeth:
+		case TokenType::Colon:
+		{
+			return ParseVariableDeclarationStatement();
+		}
 		case TokenType::DoubleColon:
 		{
 			Token identifier = *token;
@@ -794,8 +807,6 @@ static unique_ptr<Statement> ParseStatement()
 		}
 		case TokenType::LeftParen:
 			return ParseFunctionCall();
-		default:
-			return ParseVariableStatement();
 		}
 
 		throw LimeError("Invalid identifier expression '%.*s'", next->length, next->start);

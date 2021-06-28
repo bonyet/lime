@@ -5,26 +5,16 @@
 // Annotations / attributes
 // Templates / generics
 
-Dog :: struct
+sum :: (a: int, b: int) -> int
 {
-	int eyeballs;
-}
-
-test :: (int eyeballs)
-{
+	return a + b;
 }
 
 main :: () -> int
 {
-	Dog dog;
-	dog.eyeballs = 5 + 10;
-	int i = dog.eyeballs;
-	test(dog.eyeballs);
-
-	dog.eyeballs = 0;
-	i = 10;
-
-	dog.eyeballs = dog.eyeballs + 5;
-
-	return 5;
+	a: int = 5;
+	b: int = 10;
+	c: int = sum(a, b);
+	z:= 5;
+	return c;
 }

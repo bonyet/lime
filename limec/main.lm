@@ -12,9 +12,15 @@ sum :: (a: int, b: int) -> int
 
 main :: () -> int
 {
-	a: int = 5;
-	b: int = 10;
-	c: int = sum(a, b);
-	z:= 5;
+	a : int = 5;
+	b : int = 10;
+	c : int = sum(a, b);
+	d := 5.5 + 10.0;
+
+	if a >= 5
+	{
+		f : int = 0;
+	}
+
 	return c;
 }

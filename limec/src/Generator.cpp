@@ -530,7 +530,7 @@ static void ResolveParsedTypes(ParseResult& result)
 	// Resolve the primitive types
 	{
 		Type::int32Type->raw  = llvm::Type::getInt32Ty(*context);
-		Type::floatType->raw  = llvm::Type::getFloatPtrTy(*context);
+		Type::floatType->raw  = llvm::Type::getFloatTy(*context);
 		Type::boolType->raw   = llvm::Type::getInt1Ty(*context);
 		Type::stringType->raw = llvm::Type::getInt1PtrTy(*context);
 		Type::voidType->raw   = llvm::Type::getVoidTy(*context);

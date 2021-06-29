@@ -559,20 +559,35 @@ static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
 		flags |= VariableFlags_Global;
 
 	Advance(); // To :
-	if (parser->current.type == TokenType::WalrusTeeth)
-	{
-		// Automatically deduce variable type
-		throw LimeError("automatic type deduction not supported");
-	}
-
-	Token typeToken = Advance();
-
-	Advance(); // Through name
-
+	
 	auto variable = make_unique<VariableDefinition>();
 	variable->scope = parser->scopeDepth;
 	variable->name = std::string(nameToken.start, nameToken.length);
-	variable->type = GetType(std::string(typeToken.start, typeToken.length));
+
+	if (parser->current.type == TokenType::WalrusTeeth)
+	{
+		OrState(ParseState::VariableWrite);
+
+		// Automatically deduce variable type
+		Advance(); // Through :=
+
+		// Now we are at the expression to assign to the variable
+		auto expression = ParseExpression(-1);
+		variable->type = expression->type;
+		variable->initializer = std::move(expression);
+
+		Expect(TokenType::Semicolon, "Expected ';' after expression");
+		
+		ResetState();
+	}
+	else
+	{
+		Token typeToken = Advance();
+		
+		Advance(); // Through name
+		variable->type = GetType(std::string(typeToken.start, typeToken.length));
+	}
+	
 	variable->flags = flags;
 
 	RegisterVariable(variable->name, variable->type, variable->flags);

@@ -21,6 +21,9 @@ project "limec"
 	language "C++"
 	cppdialect "C++17"
 	staticruntime "off"
+	
+	pchheader "limecpch.h"
+	pchsource "limec/src/limecpch.cpp"
 
 	targetdir ("bin/" .. outputdir .. "/%{prj.name}")
 	objdir ("bin-int/" .. outputdir .. "/%{prj.name}")

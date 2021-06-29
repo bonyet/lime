@@ -1,11 +1,10 @@
-#include <llvm/IR/Value.h>
+#include "limecpch.h"
 
-#include "Error.h"
+#include <llvm/IR/Value.h>
 
 #include "Tree.h"
 #include "Typer.h"
 #include "Parser.h"
-#include "Profiler.h"
 
 #include <unordered_map>
 #include "Scope.h"

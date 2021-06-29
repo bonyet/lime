@@ -1,7 +1,4 @@
-#include <string>
-#include "Utils.h"
-
-#include "Error.h"
+#include "limecpch.h"
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/IRBuilder.h>
@@ -11,7 +8,6 @@
 #include "Tree.h"
 #include "Typer.h"
 #include "Generator.h"
-#include "Profiler.h"
 
 static std::unique_ptr<llvm::LLVMContext> context;
 static std::unique_ptr<llvm::IRBuilder<>> builder;

@@ -48,9 +48,8 @@ main:                                   # @main
 	callq	sum
 	addq	$32, %rsp
 	movl	%eax, -4(%rbp)
-	movl	-8(%rbp), %eax
-	movl	%eax, -12(%rbp)
-	cmpl	$5, %eax
+	movl	$1098383360, -12(%rbp)          # imm = 0x41780000
+	cmpl	$5, -8(%rbp)
 	jb	.LBB1_2
 # %bb.1:                                # %btrue
 	movl	$16, %eax
@@ -65,3 +64,4 @@ main:                                   # @main
 	retq
 	.seh_endproc
                                         # -- End function
+	.globl	_fltused

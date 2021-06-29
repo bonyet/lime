@@ -1,10 +1,6 @@
+#include "limecpch.h"
+
 #include "Lexer.h"
-
-#include <string>
-#include "Utils.h"
-
-#include "Error.h"
-#include "Profiler.h"
 
 static Lexer* lexer;
 

@@ -1,9 +1,6 @@
-#include <string>
+#include "limecpch.h"
 
 #include "Emitter.h"
-#include <fstream>
-
-#include "Profiler.h"
 
 void Emitter::Emit(const std::string& ir, const char* filepath)
 {

@@ -1,3 +1,5 @@
+#include "limecpch.h"
+
 #include <llvm/IR/Value.h>
 
 #include "PlatformUtils.h"
@@ -6,10 +8,6 @@
 
 #include "Generator.h"
 #include "Emitter.h"
-#include "Profiler.h"
-
-#include <fstream>
-
 #include "JIT.h"
 
 static std::string ReadFile(const char* filepath)

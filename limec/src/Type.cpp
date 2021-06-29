@@ -1,11 +1,6 @@
-#include <string>
+#include "limecpch.h"
 
 #include "Type.h"
-#include <memory>
-
-#include "Utils.h"
-#include "Error.h"
-
 #include "Typer.h"
 
 Type* Type::int32Type = new Type

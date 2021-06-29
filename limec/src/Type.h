@@ -1,8 +1,5 @@
 #pragma once
 
-#include <vector>
-#include <llvm/IR/Type.h>
-
 struct Type
 {
 	static Type* int32Type, *floatType, *boolType, *stringType, *voidType;

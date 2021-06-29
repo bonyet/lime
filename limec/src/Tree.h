@@ -1,10 +1,6 @@
 #pragma once
 
 #include "Lexer.h"
-
-#include <string>
-#include "Utils.h"
-
 #include "Type.h"
 
 enum class StatementType

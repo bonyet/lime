@@ -107,7 +107,7 @@ llvm::Value* VariableRead::Generate()
 		throw CompileError("unknown variable '%s'", name.c_str());
 
 	NamedValue& value = namedValues[name];
-	return builder->CreateLoad(value.raw, "loadtmp");
+	return builder->CreateLoad(value.type, value.raw, "loadtmp");
 }
 
 llvm::Value* VariableWrite::Generate()
@@ -429,6 +429,8 @@ llvm::Value* StructureDefinition::Generate()
 llvm::Value* MemberRead::Generate()
 {
 	PROFILE_FUNCTION();
+
+	// TODO: type of member read must be type of structure member
 
 	NamedValue& structure = namedValues[variableName];
 

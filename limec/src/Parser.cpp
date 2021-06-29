@@ -45,7 +45,7 @@ static void IncreaseScope()
 {
 #ifdef _DEBUG
 	if (parser->scopeDepth <= 0)
-		throw LimeError("Cannot decrease a scope depth of 0");
+		throw LimeError("cannot decrease a scope depth of 0");
 #endif
 	parser->scope = &scopes[--parser->scopeDepth];
 }
@@ -370,7 +370,7 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 		}
 	}
 
-	throw LimeError("Invalid token for primary expression: %.*s", token.length, token.start);
+	throw LimeError("invalid token for primary expression: %.*s", token.length, token.start);
 }
 
 static unique_ptr<Statement> ParseExpressionStatement()
@@ -378,7 +378,7 @@ static unique_ptr<Statement> ParseExpressionStatement()
 	PROFILE_FUNCTION();
 
 	unique_ptr<Statement> statement = ParseExpression(-1);
-	Expect(TokenType::Semicolon, "Expected ';' after expression");
+	Expect(TokenType::Semicolon, "expected ';' after expression");
 
 	return statement;
 }
@@ -399,7 +399,7 @@ static unique_ptr<Expression> ParseFunctionDeclaration(Token* nameToken)
 	Token* current = &parser->current;
 
 	Advance(); // Through ::
-	Expect(TokenType::LeftParen, "Expected '(' after '::'");
+	Expect(TokenType::LeftParen, "expected '(' after '::'");
 
 	// Parse parameters
 	while (current->type != TokenType::RightParen)
@@ -408,11 +408,11 @@ static unique_ptr<Expression> ParseFunctionDeclaration(Token* nameToken)
 		param.name = std::string(current->start, current->length);
 
 		Advance(); // Through name
-		Expect(TokenType::Colon, "Expected ':' after parameter name"); // Through :
+		Expect(TokenType::Colon, "expected ':' after parameter name"); // Through :
 
 		if (current->type == TokenType::Star)
 		{
-			throw LimeError("Pointers are not supported");
+			throw LimeError("pointers are not supported");
 			// Pointer
 			param.flags |= VariableFlags_Pointer;
 
@@ -427,10 +427,10 @@ static unique_ptr<Expression> ParseFunctionDeclaration(Token* nameToken)
 
 		Advance();
 		if (current->type != TokenType::RightParen)
-			Expect(TokenType::Comma, "Expected ',' after function parameter");
+			Expect(TokenType::Comma, "expected ',' after function parameter");
 	}
 
-	Expect(TokenType::RightParen, "Expected ')'");
+	Expect(TokenType::RightParen, "expected ')'");
 
 	// Handle nondefault return types
 	if (current->type == TokenType::RightArrow)
@@ -442,7 +442,7 @@ static unique_ptr<Expression> ParseFunctionDeclaration(Token* nameToken)
 		Advance(); // Through type
 	}
 
-	Expect(TokenType::LeftCurlyBracket, "Expected '{' after function declaration");
+	Expect(TokenType::LeftCurlyBracket, "expected '{' after function declaration");
 
 	// Parse body
 	int statementIndex = 0;
@@ -460,11 +460,11 @@ static unique_ptr<Expression> ParseFunctionDeclaration(Token* nameToken)
 
 	IncreaseScope();
 
-	Expect(TokenType::RightCurlyBracket, "Expected '}' after function body");
+	Expect(TokenType::RightCurlyBracket, "expected '}' after function body");
 	
 	if (function->indexOfReturnInBody == -1 && function->type != GetType("void"))
 	{
-		throw LimeError("Expected a return statement within '%s'", function->name.c_str());
+		throw LimeError("expected a return statement within '%s'", function->name.c_str());
 	}
 
 	return function;
@@ -496,7 +496,7 @@ static unique_ptr<Expression> ParseFunctionCall()
 		ResetState();
 
 		if (current->type != TokenType::RightParen)
-			Expect(TokenType::Comma, "Expected ',' after argument");
+			Expect(TokenType::Comma, "expected ',' after argument");
 	}
 	Advance(); // Through )
 
@@ -576,7 +576,7 @@ static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
 		variable->type = expression->type;
 		variable->initializer = std::move(expression);
 
-		Expect(TokenType::Semicolon, "Expected ';' after expression");
+		Expect(TokenType::Semicolon, "expected ';' after expression");
 		
 		ResetState();
 	}
@@ -607,7 +607,7 @@ static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
 		// Parse initializer
 		variable->initializer = ParseExpression(-1);
 
-		Expect(TokenType::Semicolon, "Expected ';' after expression");
+		Expect(TokenType::Semicolon, "expected ';' after expression");
 
 		ResetState();
 	}
@@ -678,7 +678,7 @@ static unique_ptr<Statement> ParseVariableStatement()
 		statement->right = ParseExpression(-1);
 		statement->type = type;
 
-		Expect(TokenType::Semicolon, "Expected ';' after statement");
+		Expect(TokenType::Semicolon, "expected ';' after statement");
 
 		return statement;
 	}
@@ -696,7 +696,7 @@ static unique_ptr<Statement> ParseVariableStatement()
 	variable->right = ParseExpression(-1);
 	parser->state = previousState;
 
-	Expect(TokenType::Semicolon, "Expected ';' after statement");
+	Expect(TokenType::Semicolon, "expected ';' after statement");
 
 	return variable;
 }
@@ -714,7 +714,7 @@ static unique_ptr<Statement> ParseBranchStatement()
 	// Parse the expression
 	statement->expression = ParseExpression(-1);
 
-	Expect(TokenType::LeftCurlyBracket, "Expected '{' after expression");
+	Expect(TokenType::LeftCurlyBracket, "expected '{' after expression");
 
 	DeepenScope();
 
@@ -724,7 +724,7 @@ static unique_ptr<Statement> ParseBranchStatement()
 		statement->ifBody.push_back(ParseStatement());
 	}
 
-	Expect(TokenType::RightCurlyBracket, "Expected '}' after body");
+	Expect(TokenType::RightCurlyBracket, "expected '}' after body");
 
 	// Else should be a different scope from if
 	IncreaseScope();
@@ -735,7 +735,7 @@ static unique_ptr<Statement> ParseBranchStatement()
 		// We have an else body
 		Advance(); // Through else
 
-		Expect(TokenType::LeftCurlyBracket, "Expected '{' after else");
+		Expect(TokenType::LeftCurlyBracket, "expected '{' after else");
 
 		// Parse else body
 		while (current->type != TokenType::RightCurlyBracket)
@@ -743,7 +743,7 @@ static unique_ptr<Statement> ParseBranchStatement()
 			statement->elseBody.push_back(ParseStatement());
 		}
 
-		Expect(TokenType::RightCurlyBracket, "Expected '}' after body");
+		Expect(TokenType::RightCurlyBracket, "expected '}' after body");
 	}
 
 	IncreaseScope();
@@ -763,7 +763,7 @@ static unique_ptr<Statement> ParseStructureDeclaration(Token* nameToken)
 
 	Advance(); // Through ::
 	Advance(); // Through 'struct'
-	Expect(TokenType::LeftCurlyBracket, "Expected '{' after 'struct'");
+	Expect(TokenType::LeftCurlyBracket, "expected '{' after 'struct'");
 
 	Token* current = &parser->current;
 	
@@ -779,7 +779,7 @@ static unique_ptr<Statement> ParseStructureDeclaration(Token* nameToken)
 
 	IncreaseScope();
 
-	Expect(TokenType::RightCurlyBracket, "Expected '}' ater struct body");
+	Expect(TokenType::RightCurlyBracket, "expected '}' ater struct body");
 
 	return structure;
 }
@@ -824,7 +824,7 @@ static unique_ptr<Statement> ParseStatement()
 			return ParseFunctionCall();
 		}
 
-		throw LimeError("Invalid identifier expression '%.*s'", next->length, next->start);
+		throw LimeError("invalid identifier expression '%.*s'", next->length, next->start);
 	}
 	case TokenType::If:
 		return ParseBranchStatement();
@@ -837,7 +837,7 @@ static unique_ptr<Statement> ParseCompoundStatement()
 {
 	PROFILE_FUNCTION();
 
-	Expect(TokenType::LeftCurlyBracket, "Expect '{' to begin compound statement");
+	Expect(TokenType::LeftCurlyBracket, "expect '{' to begin compound statement");
 
 	DeepenScope();
 
@@ -852,7 +852,7 @@ static unique_ptr<Statement> ParseCompoundStatement()
 
 	IncreaseScope();
 
-	Expect(TokenType::RightCurlyBracket, "Expect '}' to end compound statement");
+	Expect(TokenType::RightCurlyBracket, "expect '}' to end compound statement");
 	return compound;
 }
 
@@ -871,62 +871,6 @@ static unique_ptr<Compound> ParseModule()
 
 	return compound;
 }
-
-#if 0
-static void DoSecondPass(std::unique_ptr<Compound>& compound)
-{
-	for (unique_ptr<Statement>& statement : compound->statements)
-	{
-		// MUST know *type name*
-
-		switch (statement->statementType)
-		{
-		case StatementType::MemberReadExpr:
-		{
-			MemberRead* pExpr = dynamic_cast<MemberRead*>(statement.get());
-			Assert(pExpr, "Invalid member expression");
-
-			UserDefinedType* structureType = nullptr;
-
-			Assert(structureType = static_cast<UserDefinedType*>(pExpr->type), "Invalid type for member write node");
-
-			int index = 0;
-			for (auto& member : structureType->members)
-			{
-				if (member.first == pExpr->memberName) {
-					pExpr->indexIntoStructure = index;
-					break;
-				}
-
-				index++;
-			}
-
-			continue;
-		}
-		case StatementType::MemberWriteExpr:
-		{
-			MemberWrite* pExpr = dynamic_cast<MemberWrite*>(statement.get());
-			UserDefinedType* structureType = nullptr;
-
-			Assert(structureType = static_cast<UserDefinedType*>(pExpr->type), "Invalid type for member write node");
-
-			int index = 0;
-			for (auto& member : structureType->members)
-			{
-				if (member.first == pExpr->memberName) {
-					pExpr->indexIntoStructure = index;
-					break;
-				}
-
-				index++;
-			}
-
-			continue;
-		}
-		}
-	}
-}
-#endif
 
 ParseResult Parser::Parse(Lexer* lexer)
 {

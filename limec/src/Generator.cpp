@@ -66,6 +66,11 @@ llvm::Value* VariableDefinition::Generate()
 	
 	PROFILE_FUNCTION();
 	
+	if (namedValues.count(name))
+	{
+		throw CompileError("variable '%s' already defined", name.c_str());
+	}
+
 	llvm::Type* type = this->type->raw;
 	if (scope == 0)
 	{
@@ -75,7 +80,7 @@ llvm::Value* VariableDefinition::Generate()
 		gVar->setLinkage(GlobalValue::CommonLinkage);
 
 		if (initializer)
-			gVar->setInitializer((Constant*)initializer->Generate());
+			gVar->setInitializer(static_cast<Constant*>(initializer->Generate()));
 
 		namedValues[name] = { gVar, type, flags };
 
@@ -86,6 +91,7 @@ llvm::Value* VariableDefinition::Generate()
 	AllocaInst* allocaInst = builder->CreateAlloca(type, nullptr, name);
 	namedValues[name] = { allocaInst, type, flags };
 
+	// Store initializer value into this variable if we have one
 	if (initializer)
 	{
 		Value* value = (Value*)initializer->Generate();
@@ -101,10 +107,8 @@ llvm::Value* VariableRead::Generate()
 	
 	PROFILE_FUNCTION();
 
-	// TODO: enforce shadowing rules
-
 	if (!namedValues.count(name))
-		throw CompileError("Unknown variable '%s'", name.c_str());
+		throw CompileError("unknown variable '%s'", name.c_str());
 
 	NamedValue& value = namedValues[name];
 	return builder->CreateLoad(value.raw, "loadtmp");
@@ -119,7 +123,7 @@ llvm::Value* VariableWrite::Generate()
 	// TODO: enforce shadowing rules
 
 	if (!namedValues.count(name))
-		throw CompileError("Unknown variable '%s'", name.c_str());
+		throw CompileError("unknown variable '%s'", name.c_str());
 
 	NamedValue& namedValue = namedValues[name];
 	
@@ -138,39 +142,39 @@ static llvm::Value* CreateBinOp(llvm::Value* left, llvm::Value* right,
 	switch (type)
 	{
 		case BinaryType::CompoundAdd:
-			Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
+			Assert(lFlags & VariableFlags_Mutable, "cannot assign to an immutable entity");
 		case BinaryType::Add:
 		{
 			instruction = lType->isInt() ? Instruction::Add : Instruction::FAdd;
 			break;
 		}
 		case BinaryType::CompoundSub:
-			Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
+			Assert(lFlags & VariableFlags_Mutable, "cannot assign to an immutable entity");
 		case BinaryType::Subtract:
 		{
 			instruction = lType->isInt() ? Instruction::Sub : Instruction::FSub;
 			break;
 		}
 		case BinaryType::CompoundMul:
-			Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
+			Assert(lFlags & VariableFlags_Mutable, "cannot assign to an immutable entity");
 		case BinaryType::Multiply:
 		{
 			instruction = lType->isInt() ? Instruction::Mul : Instruction::FMul;
 			break;
 		}
 		case BinaryType::CompoundDiv:
-			Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
+			Assert(lFlags & VariableFlags_Mutable, "cannot assign to an immutable entity");
 		case BinaryType::Divide:
 		{
 			if (lType->isInt())
-				throw CompileError("Integer division not supported");
+				throw CompileError("integer division not supported");
 		
 			instruction = Instruction::FDiv;
 			break;
 		}
 		case BinaryType::Assign:
 		{
-			Assert(lFlags & VariableFlags_Mutable, "Cannot assign to an immutable entity");
+			Assert(lFlags & VariableFlags_Mutable, "cannot assign to an immutable entity");
 
 			return builder->CreateStore(right, left);
 		}
@@ -201,7 +205,7 @@ static llvm::Value* CreateBinOp(llvm::Value* left, llvm::Value* right,
 		}
 	}
 
-	Assert(instruction != (Instruction::BinaryOps)-1, "Invalid binary operator");
+	Assert(instruction != (Instruction::BinaryOps)-1, "invalid binary operator");
 	return builder->CreateBinOp(instruction, left, right);
 }
 
@@ -222,19 +226,19 @@ llvm::Value* Binary::Generate()
 		rFlags = namedValues[rhs->getName().str()].flags;
 
 	if (!left || !right)
-		throw CompileError("Invalid binary operator '%.*s'", operatorToken.length, operatorToken.start); // What happon
+		throw CompileError("invalid binary operator '%.*s'", operatorToken.length, operatorToken.start); // What happon
 
 	if (right->type != left->type)
-		throw CompileError("Both operands of a binary operation must be of the same type");
+		throw CompileError("both operands of a binary operation must be of the same type");
 
 	if (!right->type || !left->type)
-		throw CompileError("Invalid operands for binary operation");
+		throw CompileError("invalid operands for binary operation");
 
 	Type* lType = left->type;
 	
 	llvm::Value* value = CreateBinOp(lhs, rhs, binaryType, lType, lFlags, rFlags);
 	if (!value)
-		throw CompileError("Invalid binary operator '%.*s'", operatorToken.length, operatorToken.start);
+		throw CompileError("invalid binary operator '%.*s'", operatorToken.length, operatorToken.start);
 
 	return value;
 }
@@ -292,11 +296,11 @@ llvm::Value* Call::Generate()
 	// Look up function name
 	llvm::Function* func = module->getFunction(fnName);
 	if (!func)
-		throw CompileError("Unknown function referenced");
+		throw CompileError("unknown function referenced");
 
 	// Handle arg mismatch
 	if (func->arg_size() != args.size())
-		throw CompileError("Incorrect number of arguments passed to '%s'", fnName.c_str());
+		throw CompileError("incorrect number of arguments passed to '%s'", fnName.c_str());
 
 	// Generate arguments
 	std::vector<llvm::Value*> argValues;
@@ -304,12 +308,12 @@ llvm::Value* Call::Generate()
 	{
 		llvm::Value* generated = (llvm::Value*)expression->Generate();
 		if (!generated)
-			throw CompileError("Failed to generate function argument");
+			throw CompileError("failed to generate function argument");
 		
 		argValues.push_back(generated);
 	}
 
-	llvm::CallInst* callInst = builder->CreateCall(func, argValues);
+	llvm::CallInst* callInst = builder->CreateCall(func, argValues, "calltmp");
 	return callInst;
 }
 
@@ -355,7 +359,7 @@ llvm::Value* FunctionDefinition::Generate()
 		llvm::Type* returnType = type->raw;
 
 		if (!returnType)
-			throw CompileError("Invalid return type for '%s'", name.c_str());
+			throw CompileError("invalid return type for '%s'", name.c_str());
 
 		llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
 		function = llvm::Function::Create(functionType, llvm::Function::ExternalLinkage, name.c_str(), *module);
@@ -368,7 +372,7 @@ llvm::Value* FunctionDefinition::Generate()
 	}
 
 	if (!function->empty())
-		throw CompileError("Function cannot be redefined");
+		throw CompileError("function cannot be redefined");
 
 	currentFunction = function;
 
@@ -419,7 +423,7 @@ llvm::Value* StructureDefinition::Generate()
 {
 	PROFILE_FUNCTION();
 	
-	Assert(members.size(), "Structs must own at least one member");
+	Assert(members.size(), "structs must own at least one member");
 
 	// Type already resolved
 
@@ -448,7 +452,7 @@ llvm::Value* MemberRead::Generate()
 			index++;
 		}
 	}
-	Assert(structureIndex >= 0, "Invalid member for structure");
+	Assert(structureIndex >= 0, "invalid member for structure");
 
 	std::array<llvm::Value*, 2> indices
 	{
@@ -485,7 +489,7 @@ llvm::Value* MemberWrite::Generate()
 			index++;
 		}
 	}
-	Assert(structureIndex >= 0, "Invalid member for structure");
+	Assert(structureIndex >= 0, "invalid member for structure");
 
 	std::array<llvm::Value*, 2> indices
 	{

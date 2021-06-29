@@ -121,7 +121,7 @@ static Token StringToken()
 		char c = Peek();
 		if (c == '\n' || c == '\0')
 		{
-			throw LimeError("Unterminated string");
+			throw LimeError("unterminated string");
 		}
 
 		Advance(1);
@@ -401,7 +401,7 @@ static void ProcessToken(Token* token)
 
 	// Unknown token type
 	Advance(1);
-	throw LimeError("Unexpected token '%1s'", lexer->start);
+	throw LimeError("unexpected token '%1s'", lexer->start);
 }
 
 Token Lexer::Next()

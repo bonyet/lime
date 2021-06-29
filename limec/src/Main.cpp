@@ -21,7 +21,7 @@ static std::string ReadFile(const char* filepath)
 
 	if (!stream.good())
 	{
-		fprintf(stderr, "Failed to open file \"%s\".\n", filepath);
+		fprintf(stderr, "failed to open file \"%s\".\n", filepath);
 		return fileContents;
 	}
 

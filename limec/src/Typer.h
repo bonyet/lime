@@ -8,7 +8,7 @@ public:
 	template<typename T>
 	static T* Add(const std::string& typeName)
 	{
-		static_assert(std::is_base_of<Type, T>::value, "Cannot resolve type");
+		static_assert(std::is_base_of<Type, T>::value, "cannot resolve type");
 
 		definedTypes.push_back(new T(typeName));
 		return static_cast<T*>(definedTypes.back());
@@ -18,7 +18,7 @@ public:
 	{
 		Type* result = nullptr;
 		if (!Valid(typeName, &result))
-			throw LimeError("Type '%s' not registered\n", typeName.c_str());
+			throw LimeError("type '%s' not registered\n", typeName.c_str());
 
 		return result;
 	}

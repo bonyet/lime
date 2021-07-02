@@ -79,7 +79,8 @@ struct PrimaryString : public Primary
 
 enum class UnaryType
 {
-	Negate = 1,
+	Not = 1,
+	Negate,
 	PrefixIncrement, PrefixDecrement,
 	PostfixIncrement, PostfixDecrement,
 
@@ -90,12 +91,14 @@ struct Unary : public Expression
 {
 	Token operatorToken;
 	std::unique_ptr<Expression> operand;
-	UnaryType type = (UnaryType)0;
+	UnaryType unaryType = (UnaryType)0;
 
 	Unary()
 	{
 		statementType = StatementType::UnaryExpr;
 	}
+
+	llvm::Value* Generate() override;
 };
 
 enum class BinaryType
@@ -105,7 +108,7 @@ enum class BinaryType
 	Multiply, CompoundMul,
 	Divide,   CompoundDiv,
 	Assign,
-	Equal,
+	Equal, NotEqual,
 	Less,
 	LessEqual,
 	Greater,
@@ -115,8 +118,8 @@ enum class BinaryType
 struct Binary : public Expression
 {
 	BinaryType binaryType = (BinaryType)0;
-	Token operatorToken;
 	std::unique_ptr<Expression> left, right;
+	Token operatorToken;
 
 	Binary()
 	{
@@ -164,7 +167,7 @@ struct Return : public Expression
 		statementType = StatementType::ReturnExpr;
 	}
 
-	llvm::Value* Generate() override { return expression->Generate(); }
+	llvm::Value* Generate() override;
 };
 
 enum VariableFlags : short
@@ -188,7 +191,6 @@ struct FunctionDefinition : public Expression
 
 	std::string name;
 	std::vector<Parameter> params;
-	int indexOfReturnInBody = -1;
 	std::vector<std::unique_ptr<Statement>> body;
 	int scopeIndex = -1; // index into parser's scope container
 

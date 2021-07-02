@@ -1,26 +1,19 @@
-// TODO:
-// References / pointers (done?)
-// Structures then classes
-// Multiple return values
-// Annotations / attributes
-// Templates / generics
-
-sum :: (a: int, b: int) -> int
+car :: struct
 {
-	return a + b;
+	wheels: int;
 }
 
 main :: () -> int
 {
-	a : int = 5;
-	b : int = 10;
-	c : int = sum(a, b);
-	d := 5.5 + 10.0;
-
-	if a >= 5
+	if 1 == 2
 	{
-		f : int = 0;
+		return 5;
 	}
 
-	return c;
+	if 2 == 2
+	{
+		return 10;
+	}
+
+	return 5;
 }

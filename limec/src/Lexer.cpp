@@ -300,6 +300,11 @@ static void ProcessToken(Token* token)
 			*token = MakeToken(TokenType::Class, 5);
 			return;
 		}
+		if (CheckKeyword("const", 5))
+		{
+			*token = MakeToken(TokenType::Const, 5);
+			return;
+		}
 		break;
 	}
 	case 'e':
@@ -325,15 +330,6 @@ static void ProcessToken(Token* token)
 		if (CheckKeyword("if", 2))
 		{
 			*token = MakeToken(TokenType::If, 2);
-			return;
-		}
-		break;
-	}
-	case 'm':
-	{
-		if (CheckKeyword("mut", 3))
-		{
-			*token = MakeToken(TokenType::Mut, 3);
 			return;
 		}
 		break;

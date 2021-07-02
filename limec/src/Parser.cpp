@@ -1,7 +1,5 @@
 #include "limecpch.h"
 
-#include <llvm/IR/Value.h>
-
 #include "Tree.h"
 #include "Typer.h"
 #include "Parser.h"
@@ -16,7 +14,7 @@ using std::make_unique;
 
 #define Assert(cond, msg, ...) { if (!(cond)) { throw LimeError(msg, __VA_ARGS__); } }
 
-static const const char* reservedIdentifiers[] =
+static const char* reservedIdentifiers[] =
 {
 	"int", "float", "bool", "string", "void"
 };
@@ -40,6 +38,7 @@ static void DeepenScope()
 	parser->scopeDepth++;
 	parser->scope = &scopes.emplace_back();
 }
+
 static void IncreaseScope()
 {
 #ifdef _DEBUG
@@ -49,12 +48,11 @@ static void IncreaseScope()
 	parser->scope = &scopes[--parser->scopeDepth];
 }
 
-static int NumScopes() { return (int)scopes.size();  }
-
 static void RegisterVariable(const std::string& name, Type* varType, VariableFlags flags)
 {
 	parser->scope->namedVariableTypes[name] = { varType, flags };
 }
+
 static bool VariableExistsInScope(const std::string& name, Scope* scope = nullptr)
 {
 	if (scope)
@@ -88,7 +86,9 @@ static As* GetType(const std::string& typeName)
 
 static Type* GetVariableType(const std::string& name)
 {
-	return parser->scope->namedVariableTypes[name].type;
+	auto result = parser->scope->namedVariableTypes[name].type;
+	Assert(result, "invalid variable type");
+	return result;
 }
 
 template<typename... Args>
@@ -103,16 +103,13 @@ static void Expect(TokenType type, const char* errorMessageFmt, Args&&... args)
 // TODO: better system for saving parse state
 static ParseState oldState = ParseState::Default;
 
-static void SaveState()
-{
+static void SaveState() {
 	oldState = parser->state;
 }
-static void OrState(ParseState state)
-{
+static void OrState(ParseState state) {
 	parser->state |= state;
 }
-static void ResetState()
-{
+static void ResetState() {
 	parser->state = oldState;
 }
 
@@ -134,8 +131,9 @@ static BinaryType GetBinaryType(TokenType type)
 	case TokenType::ForwardSlashEqual: return BinaryType::CompoundDiv;
 	case TokenType::ForwardSlash:      return BinaryType::Divide;
 
-	case TokenType::Equal:        return BinaryType::Assign;
-	case TokenType::DoubleEqual:  return BinaryType::Equal;
+	case TokenType::Equal:             return BinaryType::Assign;
+	case TokenType::DoubleEqual:       return BinaryType::Equal;
+	case TokenType::ExclamationEqual:  return BinaryType::NotEqual;
 	case TokenType::Less:         return BinaryType::Less;
 	case TokenType::LessEqual:    return BinaryType::LessEqual;
 	case TokenType::Greater:      return BinaryType::Greater;
@@ -144,6 +142,7 @@ static BinaryType GetBinaryType(TokenType type)
 
 	return (BinaryType)0;
 }
+
 static int GetBinaryPriority(BinaryType type)
 {
 	switch (type)
@@ -161,10 +160,19 @@ static int GetBinaryPriority(BinaryType type)
 		return 20;
 	case BinaryType::Assign:
 	case BinaryType::Equal:
+	case BinaryType::NotEqual:
 		return 19;
 	}
 
 	return 0;
+}
+
+static bool IsCompoundAssignmentOp(BinaryType type)
+{
+	return type == BinaryType::CompoundAdd ||
+		type == BinaryType::CompoundSub ||
+		type == BinaryType::CompoundMul ||
+		type == BinaryType::CompoundDiv;
 }
 
 // Forward declarations
@@ -223,7 +231,7 @@ static unique_ptr<Expression> ParseUnaryExpression()
 
 	Token* token = &parser->current;
 
-	// Handle groupings
+	// Groupings
 	if (token->type == TokenType::LeftParen)
 	{
 		Advance(); // Through (
@@ -238,7 +246,7 @@ static unique_ptr<Expression> ParseUnaryExpression()
 	{
 		unique_ptr<Unary> unary = make_unique<Unary>();
 		unary->operatorToken = *token;
-		unary->type = type;
+		unary->unaryType = type;
 
 		Advance(); // To operand
 		unary->operand = ParsePrimaryExpression();
@@ -248,9 +256,10 @@ static unique_ptr<Expression> ParseUnaryExpression()
 	// Prefix unary operators
 	switch (token->type)
 	{
-		case TokenType::Dash:      return makeUnary(UnaryType::Negate);
-		case TokenType::Increment: return makeUnary(UnaryType::PrefixIncrement);
-		case TokenType::Decrement: return makeUnary(UnaryType::PrefixDecrement);
+		case TokenType::Exclamation: return makeUnary(UnaryType::Not);
+		case TokenType::Dash:        return makeUnary(UnaryType::Negate);
+		case TokenType::Increment:   return makeUnary(UnaryType::PrefixIncrement);
+		case TokenType::Decrement:   return makeUnary(UnaryType::PrefixDecrement);
 	}
 
 	// Suffix unary operators
@@ -274,7 +283,7 @@ static unique_ptr<Expression> ParseUnaryExpression()
 		
 		unique_ptr<Unary> unary = make_unique<Unary>();
 		unary->operatorToken = *token;
-		unary->type = type;
+		unary->unaryType = type;
 
 		unary->operand = ParsePrimaryExpression();
 		Advance();
@@ -422,7 +431,7 @@ static unique_ptr<Expression> ParseFunctionDeclaration(Token* nameToken)
 		function->params.push_back(param);
 
 		// Register to scope
-		RegisterVariable(param.name, param.type, VariableFlags_None);
+		RegisterVariable(param.name, param.type, param.flags);
 
 		Advance();
 		if (current->type != TokenType::RightParen)
@@ -445,12 +454,13 @@ static unique_ptr<Expression> ParseFunctionDeclaration(Token* nameToken)
 
 	// Parse body
 	int statementIndex = 0;
+	bool hasReturnStatement = false;
 	while (current->type != TokenType::RightCurlyBracket)
 	{
 		auto statement = ParseStatement();
 
 		if (dynamic_cast<Return*>(statement.get()))
-			function->indexOfReturnInBody = statementIndex;
+			hasReturnStatement = true;
 
 		function->body.push_back(std::move(statement));
 
@@ -461,10 +471,8 @@ static unique_ptr<Expression> ParseFunctionDeclaration(Token* nameToken)
 
 	Expect(TokenType::RightCurlyBracket, "expected '}' after function body");
 	
-	if (function->indexOfReturnInBody == -1 && function->type != GetType("void"))
-	{
+	if (!hasReturnStatement && function->type != GetType("void"))
 		throw LimeError("expected a return statement within '%s'", function->name.c_str());
-	}
 
 	return function;
 }
@@ -544,15 +552,16 @@ static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
 {
 	PROFILE_FUNCTION();
 
-	VariableFlags flags = VariableFlags_Immutable; // Immutable by default
+	VariableFlags flags = VariableFlags_Mutable; // Mutable by default
 
 	// We start at the name
+	if (parser->current.type == TokenType::Const)
+	{
+		flags = VariableFlags_Immutable;
+		Advance(); // Through 'const'
+	}
+
 	Token nameToken = parser->current;
-	//if (startToken.type == TokenType::Mut)
-	//{
-	//	flags = VariableFlags_Mutable;
-	//	startToken = Advance(); // To type
-	//}
 
 	if (parser->scopeDepth == 0)
 		flags |= VariableFlags_Global;
@@ -641,6 +650,35 @@ static unique_ptr<Expression> ParseMemberAccessExpression()
 	return expr;
 }
 
+static unique_ptr<Statement> ParseMemberWriteStatement(const std::string& variableName, Type* type)
+{
+	Token* current = &parser->current;
+
+	Advance(); // To .
+	Advance(); // Through .
+
+	std::string memberName = std::string(current->start, current->length);
+
+	Advance(); // Through id
+
+	// Advance through the = if there is one
+	if (current->type == TokenType::Equal)
+		Advance();
+
+	auto statement = make_unique<MemberWrite>();
+
+	statement->variableTypename = type->name;
+	statement->variableName = variableName;
+	statement->memberName = memberName;
+
+	statement->right = ParseExpression(-1);
+	statement->type = type;
+
+	Expect(TokenType::Semicolon, "expected ';' after statement");
+
+	return statement;
+}
+
 static unique_ptr<Statement> ParseVariableStatement()
 {
 	PROFILE_FUNCTION();
@@ -650,54 +688,68 @@ static unique_ptr<Statement> ParseVariableStatement()
 	std::string variableName = std::string(current->start, current->length);
 
 	// Creation of variable
-	if (!VariableExistsInScope(variableName))
-		return ParseVariableDeclarationStatement();
+	//if (!VariableExistsInScope(variableName))
+	//	return ParseVariableDeclarationStatement();
 
 	Type* type = GetVariableType(variableName);
 
 	if (parser->lexer->nextToken.type == TokenType::Dot)
-	{
-		Advance(); // To .
-		Advance(); // Through .
+		return ParseMemberWriteStatement(variableName, type);
 
-		std::string memberName = std::string(current->start, current->length);
+	Advance(); // Through identifier
 
-		Advance(); // Through id
+	Token operatorToken = *current;
+	Advance();
 
-		// Advance through the = if there is one
-		if (current->type == TokenType::Equal)
-			Advance();
-
-		auto statement = make_unique<MemberWrite>();
-
-		statement->variableTypename = type->name;
-		statement->variableName = variableName;
-		statement->memberName = memberName;
-		
-		statement->right = ParseExpression(-1);
-		statement->type = type;
-
-		Expect(TokenType::Semicolon, "expected ';' after statement");
-
-		return statement;
-	}
+	auto previousState = parser->state;
+	OrState(ParseState::VariableWrite);
 
 	auto variable = make_unique<VariableWrite>();
 	variable->name = variableName;
 	variable->type = type;
 
-	Advance(); // Through identifier
+	BinaryType binaryOp = GetBinaryType(operatorToken.type);
+	if (IsCompoundAssignmentOp(binaryOp))
+	{
+		OrState(ParseState::VariableWrite);
+		
+		auto binary = make_unique<Binary>();
 
-	Advance(); // Through =
+		switch (binaryOp)
+		{
+		case BinaryType::CompoundAdd: binary->binaryType = BinaryType::CompoundAdd; break;
+		case BinaryType::CompoundSub: binary->binaryType = BinaryType::CompoundSub; break;
+		case BinaryType::CompoundMul: binary->binaryType = BinaryType::CompoundMul; break;
+		case BinaryType::CompoundDiv: binary->binaryType = BinaryType::CompoundDiv; break;
+		}
 
-	auto previousState = parser->state;
-	OrState(ParseState::VariableWrite);
-	variable->right = ParseExpression(-1);
-	parser->state = previousState;
+		auto left = make_unique<VariableRead>();
+		left->name = variableName;
+		left->type = type;
 
-	Expect(TokenType::Semicolon, "expected ';' after statement");
+		binary->left = std::move(left);
+		binary->operatorToken = operatorToken;
+		binary->right = ParseExpression(-1);
+		binary->type = type;
+		
+		parser->state = previousState;
 
-	return variable;
+		Expect(TokenType::Semicolon, "expected ';' after statement");
+
+		variable->right = std::move(binary);
+
+		return variable;
+	}
+	else
+	{
+		variable->right = ParseExpression(-1);
+
+		parser->state = previousState;
+
+		Expect(TokenType::Semicolon, "expected ';' after statement");
+
+		return variable;
+	}
 }
 
 static unique_ptr<Statement> ParseBranchStatement()
@@ -793,7 +845,7 @@ static unique_ptr<Statement> ParseStatement()
 	{
 	case TokenType::LeftCurlyBracket:
 		return ParseCompoundStatement();
-	case TokenType::Mut:
+	case TokenType::Const:
 	case TokenType::ID:
 	{
 		Token* next = &parser->lexer->nextToken;
@@ -821,6 +873,8 @@ static unique_ptr<Statement> ParseStatement()
 		}
 		case TokenType::LeftParen:
 			return ParseFunctionCall();
+		default:
+			return ParseVariableStatement(); // If all else 'fails', it's a variable statement
 		}
 
 		throw LimeError("invalid identifier expression '%.*s'", next->length, next->start);

@@ -22,7 +22,7 @@ enum class TokenType : char
 	// Keywords
 	And, Or, If, Else,
 	True, False,
-	Return, Mut,
+	Return, Const,
 	Struct, Class,
 
 	// Misc

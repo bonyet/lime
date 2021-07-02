@@ -1,10 +1,5 @@
 #include "limecpch.h"
 
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/IRBuilder.h>
-#include <llvm/IR/Verifier.h>
-#include <llvm/IR/Value.h>
-
 #include "Tree.h"
 #include "Typer.h"
 #include "Generator.h"
@@ -14,7 +9,7 @@ static std::unique_ptr<llvm::IRBuilder<>> builder;
 static std::unique_ptr<llvm::Module> module;
 static llvm::Function* currentFunction = nullptr;
 
-#define Assert(cond, msg) { if (!(cond)) { throw CompileError(msg); } }
+#define Assert(cond, msg, ...) { if (!(cond)) { throw CompileError(msg, __VA_ARGS__); } }
 
 struct NamedValue
 {
@@ -67,7 +62,10 @@ llvm::Value* VariableDefinition::Generate()
 		throw CompileError("variable '%s' already defined", name.c_str());
 	}
 
+	// TODO: automatic type deduction from function calls
 	llvm::Type* type = this->type->raw;
+	Assert(type, "unresolved type for variable '%s'", name.c_str());
+
 	if (scope == 0)
 	{
 		// Global varable
@@ -127,6 +125,29 @@ llvm::Value* VariableWrite::Generate()
 	return builder->CreateStore(value, namedValue.raw, "storetmp");
 }
 
+llvm::Value* Unary::Generate()
+{
+	using namespace llvm;
+
+	PROFILE_FUNCTION();
+
+	// Error handling
+	if (!operand->type->isBool() && !operand->type->isInt())
+		throw CompileError("invalid operand for unary not (!). operand must be integral.");
+
+	Value* value = operand->Generate();
+
+	switch (unaryType)
+	{
+	case UnaryType::Not: // !value
+		return builder->CreateNot(value, "nottmp");
+	case UnaryType::Negate: // -value
+		return builder->CreateNeg(value, "negtmp");
+	}
+
+	throw CompileError("invalid unary operator");
+}
+
 static llvm::Value* CreateBinOp(llvm::Value* left, llvm::Value* right, 
 	BinaryType type, Type* lType, VariableFlags lFlags, VariableFlags rFlags)
 {
@@ -176,8 +197,17 @@ static llvm::Value* CreateBinOp(llvm::Value* left, llvm::Value* right,
 		}
 		case BinaryType::Equal:
 		{
-			return lType->isInt() ? builder->CreateICmpEQ(left, right, "cmptmp") :
-				builder->CreateFCmpUEQ(left, right, "cmptmp");
+			if (lType->isInt() || lType->isBool())
+				return builder->CreateICmpEQ(left, right, "cmptmp");
+			else if (lType->isFloat())
+				return builder->CreateFCmpUEQ(left, right, "cmptmp");
+		}
+		case BinaryType::NotEqual:
+		{
+			if (lType->isInt() || lType->isBool())
+				return builder->CreateICmpNE(left, right, "cmptmp");
+			else if (lType->isFloat())
+				return builder->CreateFCmpUNE(left, right, "cmptmp");
 		}
 		case BinaryType::Less:
 		{
@@ -214,15 +244,21 @@ llvm::Value* Binary::Generate()
 
 	VariableFlags lFlags = VariableFlags_None, rFlags = VariableFlags_None;
 
-	// Handle flags
-	auto leftName = lhs->getName().str(), rightName = rhs->getName().str();
-	if (lhs->hasName() && namedValues.count(leftName))
-		lFlags = namedValues[lhs->getName().str()].flags;
-	if (rhs->hasName() && namedValues.count(rightName))
-		rFlags = namedValues[rhs->getName().str()].flags;
-
 	if (!left || !right)
 		throw CompileError("invalid binary operator '%.*s'", operatorToken.length, operatorToken.start); // What happon
+
+	// Handle flags
+	{
+		if (left->statementType == StatementType::VariableReadExpr)
+			lFlags = namedValues[static_cast<VariableRead*>(left.get())->name].flags;
+		else if (left->statementType == StatementType::VariableWriteExpr)
+			lFlags = namedValues[static_cast<VariableWrite*>(left.get())->name].flags;
+
+		if (right->statementType == StatementType::VariableReadExpr)
+			rFlags = namedValues[static_cast<VariableRead*>(right.get())->name].flags;
+		else if (right->statementType == StatementType::VariableWriteExpr)
+			rFlags = namedValues[static_cast<VariableWrite*>(right.get())->name].flags;
+	}
 
 	if (right->type != left->type)
 		throw CompileError("both operands of a binary operation must be of the same type");
@@ -256,25 +292,32 @@ llvm::Value* Branch::Generate()
 	BasicBlock* endBlock = BasicBlock::Create(*context, "end", currentFunction);
 	// Generate bodies
 	{
-		builder->SetInsertPoint(trueBlock);
-		// Generate true body
-		for (auto& statement : ifBody)
+		auto createBlock = [endBlock](BasicBlock* block, const std::vector<std::unique_ptr<Statement>>& statements)
 		{
-			statement->Generate();
-		}
+			builder->SetInsertPoint(block);
 
-		// Add jump to end
-		builder->CreateBr(endBlock);
+			bool terminated = false;
+			for (auto& statement : statements)
+			{
+				statement->Generate();
 
-		// Generate false body
-		builder->SetInsertPoint(falseBlock);
-		for (auto& statement : elseBody)
-		{
-			statement->Generate();
-		}
+				if (statement->statementType == StatementType::ReturnExpr)
+				{
+					terminated = true;
+					break;
+				}
+			}
 
-		// Add jump to end
-		builder->CreateBr(endBlock);
+			// Add jump to end
+			if (!terminated)
+				builder->CreateBr(endBlock);
+		};
+
+		// Generate body for the true branch
+		createBlock(trueBlock, ifBody);
+
+		// Generate body for the true branch
+		createBlock(falseBlock, elseBody);
 	}
 
 	builder->SetInsertPoint(parentBlock); // Reset to correct insert point
@@ -336,6 +379,15 @@ static void GenerateEntryBlockAllocas(llvm::Function* function)
 	}
 }
 
+llvm::Value* Return::Generate()
+{
+	PROFILE_FUNCTION();
+
+	// Handle the return value
+	llvm::Value* returnValue = expression->Generate();
+	return builder->CreateRet(returnValue);
+}
+
 llvm::Value* FunctionDefinition::Generate()
 {
 	PROFILE_FUNCTION();
@@ -384,19 +436,9 @@ llvm::Value* FunctionDefinition::Generate()
 		PROFILE_SCOPE("Generate body :: FunctionDefinition::Generate()");
 		
 		// Generate body
-		int index = 0;
 		for (auto& statement : body)
-		{
-			if (index++ == indexOfReturnInBody)
-				continue; // Don't generate return statements twice
-
 			statement->Generate();
-		}
 	}
-
-	// Handle the return value
-	llvm::Value* returnValue = indexOfReturnInBody != -1 ? (llvm::Value*)body[indexOfReturnInBody]->Generate() : nullptr;
-	builder->CreateRet(returnValue);
 
 	{
 		PROFILE_SCOPE("Verify function :: FunctionDefinition::Generate()");
@@ -573,6 +615,8 @@ CompileResult Generator::Generate(ParseResult& parseResult)
 
 		fprintf(stderr, "CodeGenError: %s\n\n", err.message.c_str());
 	}
+
+	Typer::Release();
 
 	return result;
 }

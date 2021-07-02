@@ -16,15 +16,12 @@ struct Type
 	bool operator==(const Type* other) const { return this == other; }
 	bool operator!=(const Type* other) const { return this != other; }
 
-	bool isInt()    const { return this == int32Type; }
-	bool isFloat()  const { return this == floatType; }
-	bool isBool()   const { return this == boolType; }
+	bool isInt()    const { return this == int32Type;  }
+	bool isFloat()  const { return this == floatType;  }
+	bool isBool()   const { return this == boolType;   }
 	bool isString() const { return this == stringType; }
-	bool isVoid()   const { return this == voidType; }
-	bool isPrimitive() const
-	{
-		return isInt() || isFloat() || isString() || isBool() || isVoid();
-	}
+	bool isVoid()   const { return this == voidType;   }
+	virtual bool isPrimitive() const { return true;   }
 
 	friend class Typer;
 	friend struct UserDefinedType;
@@ -38,4 +35,6 @@ public:
 	UserDefinedType() = default;
 	UserDefinedType(const std::string& name)
 		: Type(name) {}
+
+	bool isPrimitive() const override { return false; }
 };

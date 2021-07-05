@@ -3,17 +3,20 @@ car :: struct
 	wheels: int;
 }
 
+//increment :: (value: *int)
+//{
+//	*value = *value + 1;
+//}
+
 main :: () -> int
 {
-	if 1 == 2
-	{
-		return 5;
-	}
+	a := 0;
+	b := 0;
 
-	if 2 == 2
-	{
-		return 10;
-	}
+	//increment(&a);
 
-	return 5;
+	value: *int = &a;
+	*value = 1;
+
+	return 0;
 }

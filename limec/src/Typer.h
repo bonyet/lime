@@ -38,10 +38,24 @@ public:
 		out = nullptr;
 		return false;
 	}
+	static bool Exists(const std::string& typeName)
+	{
+		for (Type* type : definedTypes)
+		{
+			if (type->name == typeName)
+				return true;
+		}
+
+		return false;
+	}
 
 	static void Release()
 	{
 		for (Type* type : definedTypes)
+		{
 			delete type;
+		}
+
+		definedTypes.clear();
 	}
 };

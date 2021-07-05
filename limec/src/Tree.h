@@ -170,13 +170,11 @@ struct Return : public Expression
 	llvm::Value* Generate() override;
 };
 
-enum VariableFlags : short
+enum VariableFlags
 {
 	VariableFlags_None      = 0 << 0,
 	VariableFlags_Immutable = 1 << 0,
-	VariableFlags_Mutable   = 1 << 1,
-	VariableFlags_Global    = 1 << 2,
-	VariableFlags_Pointer   = 1 << 3,
+	VariableFlags_Global    = 1 << 1,
 };
 
 // Yes, function declarations don't technically express anything, but this just inherits from Expression anyways
@@ -255,6 +253,7 @@ struct MemberRead : public Expression
 struct VariableRead : public Expression
 {
 	std::string name;
+	bool emitLoad = true;
 
 	VariableRead()
 	{

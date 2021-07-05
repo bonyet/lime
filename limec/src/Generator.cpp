@@ -62,9 +62,11 @@ llvm::Value* VariableDefinition::Generate()
 		throw CompileError("variable '%s' already defined", name.c_str());
 	}
 
-	// TODO: automatic type deduction from function calls
+	// TODO: deduce type from function calls (just use return type)
 	llvm::Type* type = this->type->raw;
 	Assert(type, "unresolved type for variable '%s'", name.c_str());
+
+	bool isPointer = type->isPointerTy();
 
 	if (scope == 0)
 	{
@@ -74,7 +76,7 @@ llvm::Value* VariableDefinition::Generate()
 		gVar->setLinkage(GlobalValue::CommonLinkage);
 
 		if (initializer)
-			gVar->setInitializer(static_cast<Constant*>(initializer->Generate()));
+			gVar->setInitializer(cast<Constant>(initializer->Generate()));
 
 		namedValues[name] = { gVar, type, flags };
 
@@ -88,8 +90,22 @@ llvm::Value* VariableDefinition::Generate()
 	// Store initializer value into this variable if we have one
 	if (initializer)
 	{
-		Value* value = (Value*)initializer->Generate();
-		StoreInst* storeInst = builder->CreateStore(value, allocaInst);
+		if (isPointer)
+		{
+			// type safety
+			if (initializer->type->raw != type)
+				throw CompileError("address types do not match");
+
+			Value* value = initializer->Generate();
+
+			builder->CreateStore(value, allocaInst);
+		}
+		else
+		{
+			Value* value = initializer->Generate();
+
+			builder->CreateStore(value, allocaInst);
+		}
 	}
 
 	return allocaInst;
@@ -104,8 +120,9 @@ llvm::Value* VariableRead::Generate()
 	if (!namedValues.count(name))
 		throw CompileError("unknown variable '%s'", name.c_str());
 
-	NamedValue& value = namedValues[name];
-	return builder->CreateLoad(value.type, value.raw, "loadtmp");
+	NamedValue& value = namedValues[name];	
+
+	return emitLoad ? builder->CreateLoad(value.type, value.raw, "loadtmp") : value.raw;
 }
 
 llvm::Value* VariableWrite::Generate()
@@ -122,7 +139,7 @@ llvm::Value* VariableWrite::Generate()
 	NamedValue& namedValue = namedValues[name];
 	
 	Value* value = right->Generate();
-	return builder->CreateStore(value, namedValue.raw, "storetmp");
+	return builder->CreateStore(value, namedValue.raw);
 }
 
 llvm::Value* Unary::Generate()
@@ -131,59 +148,72 @@ llvm::Value* Unary::Generate()
 
 	PROFILE_FUNCTION();
 
-	// Error handling
-	if (!operand->type->isBool() && !operand->type->isInt())
-		throw CompileError("invalid operand for unary not (!). operand must be integral.");
-
 	Value* value = operand->Generate();
 
 	switch (unaryType)
 	{
 	case UnaryType::Not: // !value
+	{
+		if (!operand->type->isBool() && !operand->type->isInt())
+			throw CompileError("invalid operand for unary not (!). operand must be integral.");
+
 		return builder->CreateNot(value, "nottmp");
+	}
 	case UnaryType::Negate: // -value
+	{
+		if (!operand->type->isInt())
+			throw CompileError("invalid operand for unary negate (-). operand must be integral.");
+
 		return builder->CreateNeg(value, "negtmp");
+	}
+	case UnaryType::AddressOf:
+		return value; // Created via an alloca
+	case UnaryType::Deref:
+		return builder->CreateLoad(value, "dereftmp");
 	}
 
 	throw CompileError("invalid unary operator");
 }
 
 static llvm::Value* CreateBinOp(llvm::Value* left, llvm::Value* right, 
-	BinaryType type, Type* lType, VariableFlags lFlags, VariableFlags rFlags)
+	BinaryType type, VariableFlags lFlags, VariableFlags rFlags)
 {
 	using llvm::Instruction;
 
 	PROFILE_FUNCTION();
 
+	llvm::Type* lType = left->getType();
 	Instruction::BinaryOps instruction = (Instruction::BinaryOps)-1;
+
+	// TODO: clean this up
 	switch (type)
 	{
 		case BinaryType::CompoundAdd:
-			Assert(lFlags & VariableFlags_Mutable, "cannot assign to an immutable entity");
+			Assert(!(lFlags & VariableFlags_Immutable), "cannot assign to an immutable entity");
 		case BinaryType::Add:
 		{
-			instruction = lType->isInt() ? Instruction::Add : Instruction::FAdd;
+			instruction = lType->isIntegerTy() ? Instruction::Add : Instruction::FAdd;
 			break;
 		}
 		case BinaryType::CompoundSub:
-			Assert(lFlags & VariableFlags_Mutable, "cannot assign to an immutable entity");
+			Assert(!(lFlags & VariableFlags_Immutable), "cannot assign to an immutable entity");
 		case BinaryType::Subtract:
 		{
-			instruction = lType->isInt() ? Instruction::Sub : Instruction::FSub;
+			instruction = lType->isIntegerTy() ? Instruction::Sub : Instruction::FSub;
 			break;
 		}
 		case BinaryType::CompoundMul:
-			Assert(lFlags & VariableFlags_Mutable, "cannot assign to an immutable entity");
+			Assert(!(lFlags & VariableFlags_Immutable), "cannot assign to an immutable entity");
 		case BinaryType::Multiply:
 		{
-			instruction = lType->isInt() ? Instruction::Mul : Instruction::FMul;
+			instruction = lType->isIntegerTy() ? Instruction::Mul : Instruction::FMul;
 			break;
 		}
 		case BinaryType::CompoundDiv:
-			Assert(lFlags & VariableFlags_Mutable, "cannot assign to an immutable entity");
+			Assert(!(lFlags & VariableFlags_Immutable), "cannot assign to an immutable entity");
 		case BinaryType::Divide:
 		{
-			if (lType->isInt())
+			if (lType->isIntegerTy())
 				throw CompileError("integer division not supported");
 		
 			instruction = Instruction::FDiv;
@@ -191,42 +221,44 @@ static llvm::Value* CreateBinOp(llvm::Value* left, llvm::Value* right,
 		}
 		case BinaryType::Assign:
 		{
-			Assert(lFlags & VariableFlags_Mutable, "cannot assign to an immutable entity");
+			Assert(!(lFlags & VariableFlags_Immutable), "cannot assign to an immutable entity");
 
 			return builder->CreateStore(right, left);
 		}
 		case BinaryType::Equal:
 		{
-			if (lType->isInt() || lType->isBool())
+			if (lType->isIntegerTy())
 				return builder->CreateICmpEQ(left, right, "cmptmp");
-			else if (lType->isFloat())
+			else if (lType->isFloatingPointTy())
 				return builder->CreateFCmpUEQ(left, right, "cmptmp");
+			break;
 		}
 		case BinaryType::NotEqual:
 		{
-			if (lType->isInt() || lType->isBool())
+			if (lType->isIntegerTy())
 				return builder->CreateICmpNE(left, right, "cmptmp");
-			else if (lType->isFloat())
+			else if (lType->isFloatingPointTy())
 				return builder->CreateFCmpUNE(left, right, "cmptmp");
+			break;
 		}
 		case BinaryType::Less:
 		{
-			return lType->isInt() ? builder->CreateICmpULT(left, right, "cmptmp") :
+			return lType->isIntegerTy() ? builder->CreateICmpULT(left, right, "cmptmp") :
 				builder->CreateFCmpULT(left, right, "cmptmp");
 		}
 		case BinaryType::LessEqual:
 		{
-			return lType->isInt() ? builder->CreateICmpULE(left, right, "cmptmp") :
+			return lType->isIntegerTy() ? builder->CreateICmpULE(left, right, "cmptmp") :
 				builder->CreateFCmpULE(left, right, "cmptmp");
 		}
 		case BinaryType::Greater:
 		{
-			return lType->isInt() ? builder->CreateICmpUGT(left, right, "cmptmp") :
+			return lType->isIntegerTy() ? builder->CreateICmpUGT(left, right, "cmptmp") :
 				builder->CreateFCmpUGT(left, right, "cmptmp");
 		}
 		case BinaryType::GreaterEqual:
 		{
-			return lType->isInt() ? builder->CreateICmpUGE(left, right, "cmptmp") :
+			return lType->isIntegerTy() ? builder->CreateICmpUGE(left, right, "cmptmp") :
 				builder->CreateFCmpUGE(left, right, "cmptmp");
 		}
 	}
@@ -249,6 +281,8 @@ llvm::Value* Binary::Generate()
 
 	// Handle flags
 	{
+		// TODO: remove this shit
+
 		if (left->statementType == StatementType::VariableReadExpr)
 			lFlags = namedValues[static_cast<VariableRead*>(left.get())->name].flags;
 		else if (left->statementType == StatementType::VariableWriteExpr)
@@ -265,10 +299,8 @@ llvm::Value* Binary::Generate()
 
 	if (!right->type || !left->type)
 		throw CompileError("invalid operands for binary operation");
-
-	Type* lType = left->type;
 	
-	llvm::Value* value = CreateBinOp(lhs, rhs, binaryType, lType, lFlags, rFlags);
+	llvm::Value* value = CreateBinOp(lhs, rhs, binaryType, lFlags, rFlags);
 	if (!value)
 		throw CompileError("invalid binary operator '%.*s'", operatorToken.length, operatorToken.start);
 
@@ -352,29 +384,26 @@ llvm::Value* Call::Generate()
 		argValues.push_back(generated);
 	}
 
-	llvm::CallInst* callInst = builder->CreateCall(func, argValues, "calltmp");
+	llvm::CallInst* callInst = builder->CreateCall(func, argValues);
 	return callInst;
 }
 
-static void GenerateEntryBlockAllocas(llvm::Function* function)
+static void GenerateEntryBlockAllocasAndLoads(llvm::Function* function)
 {
 	using namespace llvm;
 
 	PROFILE_FUNCTION();
 	
-	for (auto& arg : function->args())
+	for (Argument* arg = function->arg_begin(); arg != function->arg_end(); ++arg)
 	{
-		llvm::Type* type = arg.getType();
+		llvm::Type* type = arg->getType();
 
-		if (arg.hasAttribute(Attribute::ByRef))
-		{
-			type = type->getPointerTo();
-		}
-
-		std::string name = arg.getName().str();
+		std::string name = arg->getName().str();
 		name.pop_back(); // Remove arg suffix
 
 		AllocaInst* allocaInst = builder->CreateAlloca(type, nullptr, name);
+		builder->CreateStore(arg, allocaInst); // Store argument value into allocated value
+
 		namedValues[name] = { allocaInst, type, VariableFlags_None };
 	}
 }
@@ -430,7 +459,7 @@ llvm::Value* FunctionDefinition::Generate()
 
 	// Allocate args on the stack
 	namedValues.clear();
-	GenerateEntryBlockAllocas(function);
+	GenerateEntryBlockAllocasAndLoads(function);
 
 	{
 		PROFILE_SCOPE("Generate body :: FunctionDefinition::Generate()");
@@ -438,6 +467,13 @@ llvm::Value* FunctionDefinition::Generate()
 		// Generate body
 		for (auto& statement : body)
 			statement->Generate();
+	}
+
+	if (!block->getTerminator())
+	{
+		Assert(type->isVoid(), "return statement not found in function '%s'", name.c_str());
+
+		builder->CreateRet(nullptr);
 	}
 
 	{
@@ -552,7 +588,7 @@ Generator::Generator()
 	builder = std::make_unique<llvm::IRBuilder<>>(*context);
 }
 
-static void ResolveType(UserDefinedType* type)
+static void ResolveType(UserDefinedType* type, Type* pointerType)
 {
 	PROFILE_FUNCTION();
 	
@@ -565,6 +601,18 @@ static void ResolveType(UserDefinedType* type)
 		memberTypesForLLVM[index++] = memberType.second->raw;
 
 	type->raw = llvm::StructType::create(*context, memberTypesForLLVM, type->name, false);
+	pointerType->raw = type->raw->getPointerTo();
+}
+
+static Type* FindCorrespondingPointerType(Type* type)
+{
+	for (Type* other : Typer::GetAll())
+	{
+		if (other->name == "*" + type->name)
+			return other;
+	}
+
+	return nullptr;
 }
 
 static void ResolveParsedTypes(ParseResult& result)
@@ -578,6 +626,11 @@ static void ResolveParsedTypes(ParseResult& result)
 		Type::boolType->raw   = llvm::Type::getInt1Ty(*context);
 		Type::stringType->raw = llvm::Type::getInt1PtrTy(*context);
 		Type::voidType->raw   = llvm::Type::getVoidTy(*context);
+
+		Type::int32PtrType->raw  = llvm::Type::getInt32PtrTy(*context);
+		Type::floatPtrType->raw  = llvm::Type::getFloatPtrTy(*context);
+		Type::boolPtrType->raw   = llvm::Type::getInt1PtrTy(*context);
+		Type::stringPtrType->raw = llvm::Type::getInt1PtrTy(*context);
 	}
 
 	// Resolve non-primitives
@@ -585,7 +638,11 @@ static void ResolveParsedTypes(ParseResult& result)
 	{
 		if (!type->isPrimitive())
 		{
-			ResolveType(static_cast<UserDefinedType*>(type));
+			// Resolve it's pointer counterpart
+			Type* pointerType = nullptr;
+			pointerType = Typer::Exists("*" + type->name) ? FindCorrespondingPointerType(type) : Typer::Add<Type>("*" + type->name);
+
+			ResolveType(static_cast<UserDefinedType*>(type), pointerType);
 		}
 	}
 }

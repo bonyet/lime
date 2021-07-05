@@ -3,6 +3,7 @@
 struct Type
 {
 	static Type* int32Type, *floatType, *boolType, *stringType, *voidType;
+	static Type* int32PtrType, *floatPtrType, *boolPtrType, *stringPtrType;
 
 	std::string name;
 	llvm::Type* raw = nullptr;
@@ -21,11 +22,17 @@ struct Type
 	bool isBool()   const { return this == boolType;   }
 	bool isString() const { return this == stringType; }
 	bool isVoid()   const { return this == voidType;   }
-	virtual bool isPrimitive() const { return true;   }
 
+	bool isIntPtr()    const { return this == int32PtrType;  }
+	bool isFloatPtr()  const { return this == floatPtrType;  }
+	bool isBoolPtr()   const { return this == boolPtrType;   }
+	bool isStringPtr() const { return this == stringPtrType; }
+
+	virtual bool isPrimitive() const { return true; }
+private:
 	friend class Typer;
 	friend struct UserDefinedType;
-}; 
+};
 
 struct UserDefinedType : public Type
 {

@@ -24,7 +24,28 @@ Type* Type::voidType = new Type
 	"void"
 );
 
+Type* Type::int32PtrType = new Type
+(
+	"*int"
+);
+Type* Type::floatPtrType = new Type
+(
+	"*float"
+);
+Type* Type::boolPtrType = new Type
+(
+	"*bool"
+);
+Type* Type::stringPtrType = new Type
+(
+	"*string"
+);
+
 std::vector<Type*> Typer::definedTypes =
 {
-	Type::int32Type, Type::floatType, Type::boolType, Type::stringType, Type::voidType,
+	Type::int32Type,  Type::int32PtrType,
+	Type::floatType,  Type::floatPtrType,
+	Type::boolType,   Type::boolPtrType,
+	Type::stringType, Type::stringPtrType,
+	Type::voidType,
 };

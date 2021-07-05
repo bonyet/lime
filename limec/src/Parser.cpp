@@ -183,8 +183,8 @@ static unique_ptr<Statement>  ParseCompoundStatement();
 static unique_ptr<Expression> ParsePrimaryExpression();
 static unique_ptr<Expression> ParseVariableExpression();
 static unique_ptr<Expression> ParseMemberAccessExpression();
-static unique_ptr<Expression> ParseFunctionDeclaration(Token* current);
-static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement();
+static unique_ptr<Expression> ParseFunctionDefinition(Token* current);
+static unique_ptr<VariableDefinition> ParseVariableDefinitionStatement();
 
 static unique_ptr<Expression> ParseExpression(int priority) 
 {
@@ -250,6 +250,10 @@ static unique_ptr<Expression> ParseUnaryExpression()
 
 		Advance(); // To operand
 		unary->operand = ParsePrimaryExpression();
+
+		// Determine the type of the result of the unary expression
+		unary->type = unary->operand->type;
+
 		return unary;
 	};
 
@@ -260,6 +264,52 @@ static unique_ptr<Expression> ParseUnaryExpression()
 		case TokenType::Dash:        return makeUnary(UnaryType::Negate);
 		case TokenType::Increment:   return makeUnary(UnaryType::PrefixIncrement);
 		case TokenType::Decrement:   return makeUnary(UnaryType::PrefixDecrement);
+
+		case TokenType::Ampersand:
+		{
+			unique_ptr<Unary> unary = make_unique<Unary>();
+			unary->operatorToken = *token;
+			unary->unaryType = UnaryType::AddressOf;
+
+			auto previousState = parser->state;
+
+			Advance(); // To operand
+			unary->operand = ParsePrimaryExpression();
+			
+			{
+				VariableRead* operand = nullptr;
+				if ((operand = dynamic_cast<VariableRead*>(unary->operand.get())))
+					operand->emitLoad = false;
+			}
+
+			// &a
+			// The type of the unary expression is not the type of a,
+			// it is the type of a pointer to a.
+			unary->type = GetType("*" + unary->operand->type->name);
+			
+			return unary;
+		}
+		case TokenType::Star:
+		{
+			unique_ptr<Unary> unary = make_unique<Unary>();
+			unary->operatorToken = *token;
+			unary->unaryType = UnaryType::Deref;
+
+			Advance(); // To operand
+			unary->operand = ParsePrimaryExpression();
+
+			{
+				VariableRead* operand = nullptr;
+				if ((operand = dynamic_cast<VariableRead*>(unary->operand.get())))
+					operand->emitLoad = true;
+			}
+
+			// Determine the type of the result of the unary expression
+			std::string operandTypeName = unary->operand->type->name;
+			unary->type = GetType(operandTypeName.erase(0, 1)); // Remove the first *
+
+			return unary;
+		}
 	}
 
 	// Suffix unary operators
@@ -391,7 +441,7 @@ static unique_ptr<Statement> ParseExpressionStatement()
 	return statement;
 }
 
-static unique_ptr<Expression> ParseFunctionDeclaration(Token* nameToken)
+static unique_ptr<Expression> ParseFunctionDefinition(Token* nameToken)
 {
 	PROFILE_FUNCTION();
 
@@ -420,14 +470,12 @@ static unique_ptr<Expression> ParseFunctionDeclaration(Token* nameToken)
 
 		if (current->type == TokenType::Star)
 		{
-			throw LimeError("pointers are not supported");
-			// Pointer
-			param.flags |= VariableFlags_Pointer;
-
-			Advance(); // Through *
+			Advance(); // Through *			
+			param.type = GetType("*" + std::string(current->start, current->length));
 		}
+		else
+			param.type = GetType(std::string(current->start, current->length));
 
-		param.type = GetType(std::string(current->start, current->length));
 		function->params.push_back(param);
 
 		// Register to scope
@@ -548,11 +596,11 @@ static unique_ptr<Expression> ParseVariableExpression()
 	}
 }
 
-static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
+static unique_ptr<VariableDefinition> ParseVariableDefinitionStatement()
 {
 	PROFILE_FUNCTION();
 
-	VariableFlags flags = VariableFlags_Mutable; // Mutable by default
+	VariableFlags flags = VariableFlags_None; // Mutable by default
 
 	// We start at the name
 	if (parser->current.type == TokenType::Const)
@@ -566,7 +614,7 @@ static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
 	if (parser->scopeDepth == 0)
 		flags |= VariableFlags_Global;
 
-	Advance(); // To :
+	Advance(); // To : or :=
 	
 	auto variable = make_unique<VariableDefinition>();
 	variable->scope = parser->scopeDepth;
@@ -591,9 +639,18 @@ static unique_ptr<VariableDefinition> ParseVariableDeclarationStatement()
 	else
 	{
 		Token typeToken = Advance();
+
+		if (typeToken.type == TokenType::Star)
+		{
+			typeToken = Advance(); // Through *
+			variable->type = GetType("*" + std::string(typeToken.start, typeToken.length));
+		}
+		else
+		{
+			variable->type = GetType(std::string(typeToken.start, typeToken.length));
+		}
 		
 		Advance(); // Through name
-		variable->type = GetType(std::string(typeToken.start, typeToken.length));
 	}
 	
 	variable->flags = flags;
@@ -802,7 +859,7 @@ static unique_ptr<Statement> ParseBranchStatement()
 	return statement;
 }
 
-static unique_ptr<Statement> ParseStructureDeclaration(Token* nameToken)
+static unique_ptr<Statement> ParseStructureDefinition(Token* nameToken)
 {
 	PROFILE_FUNCTION();
 
@@ -823,7 +880,7 @@ static unique_ptr<Statement> ParseStructureDeclaration(Token* nameToken)
 	// Parse body
 	while (current->type != TokenType::RightCurlyBracket)
 	{
-		auto decl = ParseVariableDeclarationStatement();
+		auto decl = ParseVariableDefinitionStatement();
 		type->members.push_back({ decl->name, decl->type });
 		structure->members.push_back(std::move(decl));
 	}
@@ -854,7 +911,7 @@ static unique_ptr<Statement> ParseStatement()
 		case TokenType::WalrusTeeth:
 		case TokenType::Colon:
 		{
-			return ParseVariableDeclarationStatement();
+			return ParseVariableDefinitionStatement();
 		}
 		case TokenType::DoubleColon:
 		{
@@ -864,9 +921,9 @@ static unique_ptr<Statement> ParseStatement()
 			switch (next->type)
 			{
 			case TokenType::LeftParen:
-				return ParseFunctionDeclaration(&identifier);
+				return ParseFunctionDefinition(&identifier);
 			case TokenType::Struct:
-				return ParseStructureDeclaration(&identifier);
+				return ParseStructureDefinition(&identifier);
 			default:
 				throw CompileError("Invalid declaration");
 			}
@@ -940,8 +997,6 @@ ParseResult Parser::Parse(Lexer* lexer)
 		Advance(); // Lex the first token
 		
 		auto compound = ParseModule();
-		
-		//DoSecondPass(compound);
 
 		result.Succeeded = true;
 		result.module = std::move(compound);

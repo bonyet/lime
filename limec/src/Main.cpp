@@ -8,7 +8,6 @@
 
 #include "Generator.h"
 #include "Emitter.h"
-#include "JIT.h"
 
 static std::string ReadFile(const char* filepath)
 {
@@ -33,8 +32,6 @@ static std::string ReadFile(const char* filepath)
 
 	return fileContents;
 }
-
-#define JUST_IN_TIME 0
 
 int main(int argc, const char* argv[])
 {
@@ -68,22 +65,18 @@ int main(int argc, const char* argv[])
 		if (!result.Succeeded)
 			return 0;
 
-#if JUST_IN_TIME
-		JIT jit;
-#else
 		Emitter emitter;
 		emitter.Emit(result.ir, "result.ll");
 	
-	#ifdef _WIN32
-		LaunchProcess("\"llvm-as\" result.ll");
-		// Generate obj file
-		LaunchProcess("\"llc\" result.bc");
-		// Link
-		//LaunchProcess("\"link\" result.o -defaultlib:libcmt");
-	#else
-		#error "Sorry bro"
-	#endif
-#endif
+	//#ifdef _WIN32
+	//	LaunchProcess("\"llvm-as\" result.ll");
+	//	// Generate obj file
+	//	LaunchProcess("\"llc\" result.bc");
+	//	// Link
+	//	//LaunchProcess("\"link\" result.o -defaultlib:libcmt");
+	//#else
+	//	#error "Sorry bro"
+	//#endif
 	}
 
 	PROFILE_END_SESSION();

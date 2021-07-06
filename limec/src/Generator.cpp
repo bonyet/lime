@@ -22,6 +22,32 @@ static std::unordered_map<std::string, NamedValue> namedValues;
 
 static std::unordered_map<llvm::StructType*, std::vector<std::string>> structureTypeMemberNames;
 
+// Removes everything from namedValues that is not a global variable
+static void ResetStackValues()
+{
+	PROFILE_FUNCTION();
+
+	for (auto it = namedValues.begin(); it != namedValues.end(); )
+	{
+		if (!(it->second.flags & VariableFlags_Global))
+		{
+			namedValues.erase(it++);
+			continue;
+		}
+
+		++it;
+	}
+}
+
+static bool IsUnaryDereference(const std::unique_ptr<Expression>& expr)
+{
+	bool isUnary = expr->statementType == StatementType::UnaryExpr;
+	if (!isUnary)
+		return false;
+
+	return static_cast<Unary*>(expr.get())->unaryType == UnaryType::Deref;
+}
+
 llvm::Value* PrimaryValue::Generate()
 {
 	switch (type->name[0])
@@ -35,57 +61,37 @@ llvm::Value* PrimaryValue::Generate()
 	}
 }
 
-static void ResetStackValues()
-{
-	PROFILE_FUNCTION();
-	
-	for (auto it = namedValues.begin(); it != namedValues.end(); )
-	{
-		if (!(it->second.flags & VariableFlags_Global))
-		{
-			namedValues.erase(it++);
-			continue;
-		}
-
-		++it;
-	}
-}
-
 llvm::Value* VariableDefinition::Generate()
 {
 	using namespace llvm;
 	
 	PROFILE_FUNCTION();
-	
-	if (namedValues.count(name))
-	{
-		throw CompileError("variable '%s' already defined", name.c_str());
-	}
+
+	Assert(!namedValues.count(name), "variable '%s' already defined", name.c_str());
 
 	// TODO: deduce type from function calls (just use return type)
-	llvm::Type* type = this->type->raw;
-	Assert(type, "unresolved type for variable '%s'", name.c_str());
+	Assert(type->raw, "unresolved type for variable '%s'", name.c_str());
 
-	bool isPointer = type->isPointerTy();
+	bool isPointer = type->raw->isPointerTy();
 
 	if (scope == 0)
 	{
 		// Global varable
-		module->getOrInsertGlobal(name, type);
+		module->getOrInsertGlobal(name, type->raw);
 		GlobalVariable* gVar = module->getNamedGlobal(name);
 		gVar->setLinkage(GlobalValue::CommonLinkage);
 
 		if (initializer)
 			gVar->setInitializer(cast<Constant>(initializer->Generate()));
 
-		namedValues[name] = { gVar, type, flags };
+		namedValues[name] = { gVar, type->raw, flags };
 
 		return gVar;
 	}
 
 	// Allocate on the stack
-	AllocaInst* allocaInst = builder->CreateAlloca(type, nullptr, name);
-	namedValues[name] = { allocaInst, type, flags };
+	AllocaInst* allocaInst = builder->CreateAlloca(type->raw, nullptr, name);
+	namedValues[name] = { allocaInst, type->raw, flags };
 
 	// Store initializer value into this variable if we have one
 	if (initializer)
@@ -93,7 +99,7 @@ llvm::Value* VariableDefinition::Generate()
 		if (isPointer)
 		{
 			// type safety
-			if (initializer->type->raw != type)
+			if (initializer->type->raw != type->raw)
 				throw CompileError("address types do not match");
 
 			Value* value = initializer->Generate();
@@ -117,8 +123,7 @@ llvm::Value* VariableRead::Generate()
 	
 	PROFILE_FUNCTION();
 
-	if (!namedValues.count(name))
-		throw CompileError("unknown variable '%s'", name.c_str());
+	Assert(namedValues.count(name), "unknown variable '%s'", name.c_str());
 
 	NamedValue& value = namedValues[name];	
 
@@ -133,8 +138,7 @@ llvm::Value* VariableWrite::Generate()
 
 	// TODO: enforce shadowing rules
 
-	if (!namedValues.count(name))
-		throw CompileError("unknown variable '%s'", name.c_str());
+	Assert(namedValues.count(name), "unknown variable '%s'", name.c_str());
 
 	NamedValue& namedValue = namedValues[name];
 	
@@ -149,6 +153,8 @@ llvm::Value* Unary::Generate()
 	PROFILE_FUNCTION();
 
 	Value* value = operand->Generate();
+
+	// TODO: generate the other unary operators
 
 	switch (unaryType)
 	{
@@ -276,8 +282,8 @@ llvm::Value* Binary::Generate()
 
 	VariableFlags lFlags = VariableFlags_None, rFlags = VariableFlags_None;
 
-	if (!left || !right)
-		throw CompileError("invalid binary operator '%.*s'", operatorToken.length, operatorToken.start); // What happon
+	// Uh what?
+	Assert(left && right, "invalid binary operator '%.*s'", operatorToken.length, operatorToken.start);
 
 	// Handle flags
 	{
@@ -294,15 +300,11 @@ llvm::Value* Binary::Generate()
 			rFlags = namedValues[static_cast<VariableWrite*>(right.get())->name].flags;
 	}
 
-	if (right->type != left->type)
-		throw CompileError("both operands of a binary operation must be of the same type");
-
-	if (!right->type || !left->type)
-		throw CompileError("invalid operands for binary operation");
+	Assert(right->type == left->type, "both operands of a binary operation must be of the same type");
+	Assert(right->type && left->type, "invalid operands for binary operation");
 	
 	llvm::Value* value = CreateBinOp(lhs, rhs, binaryType, lFlags, rFlags);
-	if (!value)
-		throw CompileError("invalid binary operator '%.*s'", operatorToken.length, operatorToken.start);
+	Assert(value, "invalid binary operator '%.*s'", operatorToken.length, operatorToken.start);
 
 	return value;
 }
@@ -366,20 +368,17 @@ llvm::Value* Call::Generate()
 	
 	// Look up function name
 	llvm::Function* func = module->getFunction(fnName);
-	if (!func)
-		throw CompileError("unknown function referenced");
+	Assert(func, "unknown function referenced");
 
 	// Handle arg mismatch
-	if (func->arg_size() != args.size())
-		throw CompileError("incorrect number of arguments passed to '%s'", fnName.c_str());
+	Assert(args.size() == func->arg_size(), "incorrect number of arguments passed to '%s'", fnName.c_str());
 
 	// Generate arguments
 	std::vector<llvm::Value*> argValues;
 	for (auto& expression : args)
 	{
 		llvm::Value* generated = (llvm::Value*)expression->Generate();
-		if (!generated)
-			throw CompileError("failed to generate function argument");
+		Assert(generated, "failed to generate function argument");
 		
 		argValues.push_back(generated);
 	}
@@ -435,21 +434,17 @@ llvm::Value* FunctionDefinition::Generate()
 
 		llvm::Type* returnType = type->raw;
 
-		if (!returnType)
-			throw CompileError("invalid return type for '%s'", name.c_str());
+		Assert(returnType, "invalid return type for '%s'", name.c_str());
 
 		llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, false);
 		function = llvm::Function::Create(functionType, llvm::Function::ExternalLinkage, name.c_str(), *module);
 
 		// Set names for function args
 		for (auto& arg : function->args())
-		{
 			arg.setName(params[index++].name + '_'); // Suffix arguments with '_' to make stuff work
-		}
 	}
 
-	if (!function->empty())
-		throw CompileError("function cannot be redefined");
+	Assert(function->empty(), "function cannot be redefined");
 
 	currentFunction = function;
 
@@ -479,14 +474,12 @@ llvm::Value* FunctionDefinition::Generate()
 	{
 		PROFILE_SCOPE("Verify function :: FunctionDefinition::Generate()");
 
+		// Handle any errors in the function
 		if (verifyFunction(*function, &llvm::errs()))
 		{
-			printf("\nIR so far:\n");
-			module->print(llvm::errs(), nullptr);
-			printf("\n");
-
+			//module->print(llvm::errs(), nullptr);
 			function->eraseFromParent();
-			printf("\n");
+			throw CompileError("function verification failed");
 		}
 	}
 
@@ -499,7 +492,7 @@ llvm::Value* StructureDefinition::Generate()
 	
 	Assert(members.size(), "structs must own at least one member");
 
-	// Type already resolved
+	// The heavy lifting was done in ResolveType(), so we don't really do anything here
 
 	return nullptr;
 }
@@ -508,7 +501,7 @@ llvm::Value* MemberRead::Generate()
 {
 	PROFILE_FUNCTION();
 
-	// TODO: type of member read must be type of structure member
+	// TODO: type of MemberRead must be type of structure member
 
 	NamedValue& structure = namedValues[variableName];
 
@@ -537,7 +530,6 @@ llvm::Value* MemberRead::Generate()
 	};
 
 	llvm::Value* pRetrievedValue = builder->CreateGEP(type->raw, structure.raw, indices, "geptmp");
-
 
 	// Modify
 	return builder->CreateLoad(pRetrievedValue, "loadtmp");
@@ -606,9 +598,10 @@ static void ResolveType(UserDefinedType* type, Type* pointerType)
 
 static Type* FindCorrespondingPointerType(Type* type)
 {
+	std::string typeName = "*" + type->name;
 	for (Type* other : Typer::GetAll())
 	{
-		if (other->name == "*" + type->name)
+		if (other->name == typeName)
 			return other;
 	}
 
@@ -657,10 +650,9 @@ CompileResult Generator::Generate(ParseResult& parseResult)
 	{
 		ResolveParsedTypes(parseResult);
 
+		// Generate all the statements & expressions
 		for (auto& child : parseResult.module->statements)
-		{
 			child->Generate();
-		}
 
 		llvm::raw_string_ostream stream(result.ir);
 		module->print(stream, nullptr);
@@ -670,7 +662,7 @@ CompileResult Generator::Generate(ParseResult& parseResult)
 	{
 		result.Succeeded = false;
 
-		fprintf(stderr, "CodeGenError: %s\n\n", err.message.c_str());
+		fprintf(stderr, "Code generation error: %s\n\n", err.message.c_str());
 	}
 
 	Typer::Release();

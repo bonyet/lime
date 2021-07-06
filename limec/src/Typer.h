@@ -17,27 +17,24 @@ public:
 	static Type* Get(const std::string& typeName)
 	{
 		Type* result = nullptr;
-		if (!Valid(typeName, &result))
-			throw LimeError("type '%s' not registered\n", typeName.c_str());
 
-		return result;
-	}
-	static std::vector<Type*>& GetAll() { return definedTypes; }
-
-	static bool Valid(const std::string& typeName, Type** out)
-	{
+		// Make sure we have registered the type - or throw
 		for (Type* type : definedTypes)
 		{
 			if (type->name == typeName)
 			{
-				*out = type;
-				return true;
+				result = type;
 			}
 		}
 
-		out = nullptr;
-		return false;
+		if (!result)
+			throw LimeError("type '%s' not registered\n", typeName.c_str());
+
+		return result;
 	}
+
+	static std::vector<Type*>& GetAll() { return definedTypes; }
+
 	static bool Exists(const std::string& typeName)
 	{
 		for (Type* type : definedTypes)

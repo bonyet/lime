@@ -7,8 +7,9 @@ This project is still very much a work in progress. There are many known bugs an
 2. Arithmetic
 3. Functions
 
-Not exactly the largest list, by any means, but it's a start.
+Not exactly the largest list by any means, but it's a start.
 
 This file will be changed to include documentation and examples once the language is in a usable state.
 
-Currently, paths in the premake5.lua file are hard-coded, so you won't be able to build the project files (I know, I'm so kind).
+Currently, paths in the premake5.lua file are hard-coded to fit my directory structure, so you won't be able to build the project files (I know, I'm so kind).
+There are also **lots** of issues I am aware of in the code. Many of them are marked with TODOs, but any more subtle ones that you can see, feel free to open an issue or whatever the cool github people do.

@@ -1,5 +1,8 @@
 #pragma once
 
+// I might be overcomplicating the whole type and typer system, I was really burnt out and tired when making it
+// If you know better ways to do this (without changing the visible behaviour of the language), let me know
+
 struct Type
 {
 	static Type* int32Type, *floatType, *boolType, *stringType, *voidType;

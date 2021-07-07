@@ -183,14 +183,11 @@ static bool IsCompoundAssignmentOp(BinaryType type)
 
 // Forward declarations
 static unique_ptr<Statement>  ParseStatement();
-static unique_ptr<Expression> ParseFunctionCall();
 static unique_ptr<Expression> ParseUnaryExpression();
 static unique_ptr<Statement>  ParseCompoundStatement();
 static unique_ptr<Expression> ParsePrimaryExpression();
 static unique_ptr<Expression> ParseVariableExpression();
 static unique_ptr<Expression> ParseMemberAccessExpression();
-static unique_ptr<Expression> ParseFunctionDefinition(Token* current);
-static unique_ptr<VariableDefinition> ParseVariableDefinitionStatement();
 
 static unique_ptr<Expression> ParseExpression(int priority) 
 {
@@ -353,6 +350,46 @@ static unique_ptr<Expression> ParseReturnStatement()
 	return returnExpr;
 }
 
+static unique_ptr<Expression> ParseFunctionCall()
+{
+	PROFILE_FUNCTION();
+
+	// Whether or not this function call is being used as an argument in another function call (nested calls?)
+	bool isArgument    = parser->state & ParseState::FuncCallArgs;
+	bool isInitializer = parser->state & ParseState::VariableWrite;
+
+	Token* current = &parser->current;
+
+	auto call = make_unique<Call>();
+	call->fnName = std::string(current->start, current->length);
+
+	Advance(); // Through name
+	Advance(); // Through (
+
+	ParseState previousState = parser->state;
+	OrState(ParseState::FuncCallArgs);
+	// Parse arguments
+	while (current->type != TokenType::RightParen)
+	{
+		SaveState();
+		call->args.push_back(ParseExpression(-1));
+		ResetState();
+
+		if (current->type != TokenType::RightParen)
+			Expect(TokenType::Comma, "expected ',' after argument");
+	}
+	Advance(); // Through )
+
+	parser->state = previousState;
+
+	// If we are not an argument, reset state and advance through semicolon
+	// Also make sure we are not initializing a variable so that we don't advance through the semicolon we need
+	if (!isArgument && !isInitializer)
+		Advance();
+
+	return call;
+}
+
 static unique_ptr<Expression> ParsePrimaryExpression()
 {
 	PROFILE_FUNCTION();
@@ -432,9 +469,6 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 	throw LimeError("invalid token for primary expression: %.*s", token.length, token.start);
 }
 
-// An expression statement is something like:
-// i: int = 0;
-// It doesn't technically *express* anything, but we still parse it via ParseExpression
 static unique_ptr<Statement> ParseExpressionStatement()
 {
 	PROFILE_FUNCTION();
@@ -503,7 +537,7 @@ static unique_ptr<Expression> ParseFunctionDefinition(Token* nameToken)
 		Advance(); // Through type
 	}
 
-	Expect(TokenType::LeftCurlyBracket, "expected '{' after function declaration");
+	Expect(TokenType::LeftCurlyBracket, "expected '{' after function definition");
 
 	// Parse body
 	bool hasReturnStatement = false;
@@ -525,46 +559,6 @@ static unique_ptr<Expression> ParseFunctionDefinition(Token* nameToken)
 		throw LimeError("expected a return statement within '%s'", function->name.c_str());
 
 	return function;
-}
-
-static unique_ptr<Expression> ParseFunctionCall()
-{
-	PROFILE_FUNCTION();
-
-	// Whether or not this function call is being used as an argument in another function call (nested calls?)
-	bool isArgument    = parser->state & ParseState::FuncCallArgs;
-	bool isInitializer = parser->state & ParseState::VariableWrite;
-
-	Token* current = &parser->current;
-
-	auto call = make_unique<Call>();
-	call->fnName = std::string(current->start, current->length);
-
-	Advance(); // Through name
-	Advance(); // Through (
-
-	ParseState previousState = parser->state;
-	OrState(ParseState::FuncCallArgs);
-	// Parse arguments
-	while (current->type != TokenType::RightParen)
-	{
-		SaveState();
-		call->args.push_back(ParseExpression(-1));
-		ResetState();
-
-		if (current->type != TokenType::RightParen)
-			Expect(TokenType::Comma, "expected ',' after argument");
-	}
-	Advance(); // Through )
-
-	parser->state = previousState;
-
-	// If we are not an argument, reset state and advance through semicolon
-	// Also make sure we are not initializing a variable so that we don't advance through the semicolon we need
-	if (!isArgument && !isInitializer)
-		Advance();
-
-	return call;
 }
 
 static unique_ptr<Expression> ParseVariableExpression()
@@ -599,7 +593,7 @@ static unique_ptr<Expression> ParseVariableExpression()
 	}
 }
 
-static unique_ptr<VariableDefinition> ParseVariableDefinitionStatement()
+static unique_ptr<Statement> ParseVariableDefinitionStatement()
 {
 	PROFILE_FUNCTION();
 
@@ -920,7 +914,7 @@ static unique_ptr<Statement> ParseStatement()
 			case TokenType::Struct:
 				return ParseStructureDefinition(&identifier);
 			default:
-				throw CompileError("Invalid declaration");
+				throw CompileError("invalid declaration");
 			}
 		}
 		case TokenType::LeftParen:

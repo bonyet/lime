@@ -84,7 +84,7 @@ enum class UnaryType
 	PrefixIncrement, PrefixDecrement,
 	PostfixIncrement, PostfixDecrement,
 
-	AddressOf, Deref, // TODO: implement
+	AddressOf, Deref,
 };
 
 struct Unary : public Expression
@@ -177,7 +177,7 @@ enum VariableFlags
 	VariableFlags_Global    = 1 << 1,
 };
 
-// Yes, function declarations don't technically express anything, but this just inherits from Expression anyways
+// Yes, function definitions don't technically express anything, but this just inherits from Expression anyways
 struct FunctionDefinition : public Expression
 {
 	struct Parameter

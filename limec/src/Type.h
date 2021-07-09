@@ -31,20 +31,22 @@ struct Type
 	bool isBoolPtr()   const { return this == boolPtrType;   }
 	bool isStringPtr() const { return this == stringPtrType; }
 
+	bool isPointer()   const { return name[0] == '*'; }
+
 	virtual bool isPrimitive() const { return true; }
 private:
 	friend class Typer;
 	friend struct UserDefinedType;
 };
 
-struct UserDefinedType : public Type
-{
-public:
-	std::vector<std::pair<std::string, Type*>> members;
-
-	UserDefinedType() = default;
-	UserDefinedType(const std::string& name)
-		: Type(name) {}
-
-	bool isPrimitive() const override { return false; }
-};
+//struct UserDefinedType : public Type
+//{
+//public:
+//	std::vector<std::pair<std::string, Type*>> members;
+//
+//	UserDefinedType() = default;
+//	UserDefinedType(const std::string& name)
+//		: Type(name) {}
+//
+//	bool isPrimitive() const override { return false; }
+//};

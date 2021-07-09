@@ -172,9 +172,9 @@ struct Return : public Expression
 
 enum VariableFlags
 {
-	VariableFlags_None      = 0 << 0,
+	VariableFlags_None = 0 << 0,
 	VariableFlags_Immutable = 1 << 0,
-	VariableFlags_Global    = 1 << 1,
+	VariableFlags_Global = 1 << 1,
 };
 
 // Yes, function definitions don't technically express anything, but this just inherits from Expression anyways
@@ -238,24 +238,11 @@ struct StructureDefinition : public Statement
 	llvm::Value* Generate() override;
 };
 
-struct MemberRead : public Expression
-{
-	std::string variableTypename, variableName, memberName;
-	
-	MemberRead()
-	{
-		statementType = StatementType::MemberReadExpr;
-	}
-
-	llvm::Value* Generate() override;
-};
-
-struct VariableRead : public Expression
+struct Load : public Expression
 {
 	std::string name;
-	bool emitLoad = true;
 
-	VariableRead()
+	Load()
 	{
 		statementType = StatementType::VariableReadExpr;
 	}
@@ -263,25 +250,13 @@ struct VariableRead : public Expression
 	llvm::Value* Generate() override;
 };
 
-struct MemberWrite : public Expression
-{
-	std::string variableTypename, variableName, memberName;
-	std::unique_ptr<Expression> right;
-	
-	MemberWrite()
-	{
-		statementType = StatementType::MemberWriteExpr;
-	}
-
-	llvm::Value* Generate() override;
-};
-
-struct VariableWrite : public Expression
+struct Store : public Expression
 {
 	std::string name;
 	std::unique_ptr<Expression> right;
+	bool storeIntoLoad = false; // Should we load first, then store into that, or just store directly?
 
-	VariableWrite()
+	Store()
 	{
 		statementType = StatementType::VariableWriteExpr;
 	}

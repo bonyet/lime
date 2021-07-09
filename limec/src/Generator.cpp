@@ -48,6 +48,8 @@ static bool IsUnaryDereference(const std::unique_ptr<Expression>& expr)
 	return static_cast<Unary*>(expr.get())->unaryType == UnaryType::Deref;
 }
 
+static bool IsPointer(const Load* const variable) { return variable->type->isPointer(); }
+
 llvm::Value* PrimaryValue::Generate()
 {
 	switch (type->name[0])
@@ -59,6 +61,8 @@ llvm::Value* PrimaryValue::Generate()
 	case 'b':
 		return llvm::ConstantInt::getBool(*context, value.b32);
 	}
+
+	throw CompileError("invalid type for primary value");
 }
 
 llvm::Value* VariableDefinition::Generate()
@@ -117,7 +121,7 @@ llvm::Value* VariableDefinition::Generate()
 	return allocaInst;
 }
 
-llvm::Value* VariableRead::Generate()
+llvm::Value* Load::Generate()
 {
 	using namespace llvm;
 	
@@ -125,12 +129,12 @@ llvm::Value* VariableRead::Generate()
 
 	Assert(namedValues.count(name), "unknown variable '%s'", name.c_str());
 
-	NamedValue& value = namedValues[name];	
+	NamedValue& value = namedValues[name];
 
-	return emitLoad ? builder->CreateLoad(value.type, value.raw, "loadtmp") : value.raw;
+	return builder->CreateLoad(value.type, value.raw, "loadtmp");
 }
 
-llvm::Value* VariableWrite::Generate()
+llvm::Value* Store::Generate()
 {
 	using namespace llvm;
 	
@@ -143,6 +147,13 @@ llvm::Value* VariableWrite::Generate()
 	NamedValue& namedValue = namedValues[name];
 	
 	Value* value = right->Generate();
+
+	if (storeIntoLoad)
+	{
+		LoadInst* load = builder->CreateLoad(namedValue.raw, "loadtmp");
+		return builder->CreateStore(value, load);
+	}
+
 	return builder->CreateStore(value, namedValue.raw);
 }
 
@@ -191,7 +202,7 @@ static llvm::Value* CreateBinOp(llvm::Value* left, llvm::Value* right,
 	llvm::Type* lType = left->getType();
 	Instruction::BinaryOps instruction = (Instruction::BinaryOps)-1;
 
-	// TODO: clean this up
+	// TODO: clean up
 	switch (type)
 	{
 		case BinaryType::CompoundAdd:
@@ -276,7 +287,7 @@ static llvm::Value* CreateBinOp(llvm::Value* left, llvm::Value* right,
 llvm::Value* Binary::Generate()
 {
 	PROFILE_FUNCTION();
-	
+
 	llvm::Value* lhs = left->Generate();
 	llvm::Value* rhs = right->Generate();
 
@@ -290,14 +301,14 @@ llvm::Value* Binary::Generate()
 		// TODO: remove this shit
 
 		if (left->statementType == StatementType::VariableReadExpr)
-			lFlags = namedValues[static_cast<VariableRead*>(left.get())->name].flags;
+			lFlags = namedValues[static_cast<Load*>(left.get())->name].flags;
 		else if (left->statementType == StatementType::VariableWriteExpr)
-			lFlags = namedValues[static_cast<VariableWrite*>(left.get())->name].flags;
+			lFlags = namedValues[static_cast<Store*>(left.get())->name].flags;
 
 		if (right->statementType == StatementType::VariableReadExpr)
-			rFlags = namedValues[static_cast<VariableRead*>(right.get())->name].flags;
+			rFlags = namedValues[static_cast<Load*>(right.get())->name].flags;
 		else if (right->statementType == StatementType::VariableWriteExpr)
-			rFlags = namedValues[static_cast<VariableWrite*>(right.get())->name].flags;
+			rFlags = namedValues[static_cast<Store*>(right.get())->name].flags;
 	}
 
 	Assert(right->type == left->type, "both operands of a binary operation must be of the same type");
@@ -497,80 +508,6 @@ llvm::Value* StructureDefinition::Generate()
 	return nullptr;
 }
 
-llvm::Value* MemberRead::Generate()
-{
-	PROFILE_FUNCTION();
-
-	// TODO: type of MemberRead must be type of structure member
-
-	NamedValue& structure = namedValues[variableName];
-
-	UserDefinedType* userStructureType = static_cast<UserDefinedType*>(Typer::Get(variableTypename));
-
-	int structureIndex = -1;
-	{
-		int index = 0;
-		for (auto& pair : userStructureType->members)
-		{
-			if (pair.first == memberName)
-			{
-				structureIndex = index;
-				break;
-			}
-
-			index++;
-		}
-	}
-	Assert(structureIndex >= 0, "invalid member for structure");
-
-	std::array<llvm::Value*, 2> indices
-	{
-		llvm::ConstantInt::get(*context, llvm::APInt(32, 0, true)),
-		llvm::ConstantInt::get(*context, llvm::APInt(32, structureIndex, true)),
-	};
-
-	llvm::Value* pRetrievedValue = builder->CreateGEP(type->raw, structure.raw, indices, "geptmp");
-
-	// Modify
-	return builder->CreateLoad(pRetrievedValue, "loadtmp");
-}
-
-llvm::Value* MemberWrite::Generate()
-{
-	PROFILE_FUNCTION();
-	
-	NamedValue& structure = namedValues[variableName];
-
-	UserDefinedType* userStructureType = static_cast<UserDefinedType*>(Typer::Get(variableTypename));
-	
-	int structureIndex = -1;
-	{
-		int index = 0;
-		for (auto& pair : userStructureType->members)
-		{
-			if (pair.first == memberName)
-			{
-				structureIndex = index;
-				break;
-			}
-
-			index++;
-		}
-	}
-	Assert(structureIndex >= 0, "invalid member for structure");
-
-	std::array<llvm::Value*, 2> indices
-	{
-		llvm::ConstantInt::get(*context, llvm::APInt(32, 0, true)),
-		llvm::ConstantInt::get(*context, llvm::APInt(32, structureIndex, true)),
-	};
-
-	llvm::Value* pRetrievedValue = builder->CreateGEP(type->raw, structure.raw, indices, "geptmp");
-
-	// Modify
-	return builder->CreateStore(right->Generate(), pRetrievedValue);
-}
-
 Generator::Generator()
 {
 	PROFILE_FUNCTION();
@@ -578,22 +515,6 @@ Generator::Generator()
 	context = std::make_unique<llvm::LLVMContext>();
 	module = std::make_unique<llvm::Module>(llvm::StringRef(), *context);
 	builder = std::make_unique<llvm::IRBuilder<>>(*context);
-}
-
-static void ResolveType(UserDefinedType* type, Type* pointerType)
-{
-	PROFILE_FUNCTION();
-	
-	std::vector<llvm::Type*> memberTypesForLLVM;
-	memberTypesForLLVM.resize(type->members.size());
-	
-	// TODO: non-primitive member types for structures
-	int index = 0;
-	for (auto& memberType : type->members)
-		memberTypesForLLVM[index++] = memberType.second->raw;
-
-	type->raw = llvm::StructType::create(*context, memberTypesForLLVM, type->name, false);
-	pointerType->raw = type->raw->getPointerTo();
 }
 
 static Type* FindCorrespondingPointerType(Type* type)
@@ -626,18 +547,7 @@ static void ResolveParsedTypes(ParseResult& result)
 		Type::stringPtrType->raw = llvm::Type::getInt1PtrTy(*context);
 	}
 
-	// Resolve non-primitives
-	for (Type* type : Typer::GetAll())
-	{
-		if (!type->isPrimitive())
-		{
-			// Resolve it's pointer counterpart
-			Type* pointerType = nullptr;
-			pointerType = Typer::Exists("*" + type->name) ? FindCorrespondingPointerType(type) : Typer::Add<Type>("*" + type->name);
-
-			ResolveType(static_cast<UserDefinedType*>(type), pointerType);
-		}
-	}
+	// Resolve non primitive types here
 }
 
 CompileResult Generator::Generate(ParseResult& parseResult)

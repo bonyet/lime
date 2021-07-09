@@ -186,8 +186,8 @@ static unique_ptr<Statement>  ParseStatement();
 static unique_ptr<Expression> ParseUnaryExpression();
 static unique_ptr<Statement>  ParseCompoundStatement();
 static unique_ptr<Expression> ParsePrimaryExpression();
-static unique_ptr<Expression> ParseVariableExpression();
-static unique_ptr<Expression> ParseMemberAccessExpression();
+static unique_ptr<Load>       ParseVariableExpression();
+static unique_ptr<Store>      ParseVariableStatement(bool consumeSemicolon);
 
 static unique_ptr<Expression> ParseExpression(int priority) 
 {
@@ -279,9 +279,6 @@ static unique_ptr<Expression> ParseUnaryExpression()
 
 			Advance(); // To operand
 			unary->operand = ParsePrimaryExpression();
-			
-			if (unary->operand->statementType == StatementType::VariableReadExpr)
-				static_cast<VariableRead*>(unary->operand.get())->emitLoad = false;
 
 			// &a
 			// The type of the unary expression is not the type of a,
@@ -297,11 +294,20 @@ static unique_ptr<Expression> ParseUnaryExpression()
 			unary->unaryType = UnaryType::Deref;
 
 			Advance(); // To operand
-			unary->operand = ParsePrimaryExpression();
-
-			if (unary->operand->statementType == StatementType::VariableReadExpr)
-				static_cast<VariableRead*>(unary->operand.get())->emitLoad = true;
-
+			
+			//unary->operand = parser->lexer->nextToken.type == TokenType::Equal ? 
+			//	ParseVariableStatement(false) : ParsePrimaryExpression();
+			if (parser->lexer->nextToken.type == TokenType::Equal)
+			{
+				auto operand = ParseVariableStatement(false);
+				operand->storeIntoLoad = true;
+				unary->operand = std::move(operand);
+			}
+			else
+			{
+				unary->operand = ParsePrimaryExpression();
+			}
+			
 			// Determine the type of the result of the unary expression
 			std::string operandTypeName = unary->operand->type->name;
 			unary->type = GetType(operandTypeName.erase(0, 1)); // Remove the first *
@@ -404,8 +410,6 @@ static unique_ptr<Expression> ParsePrimaryExpression()
 
 			if (next->type == TokenType::LeftParen)
 				return ParseFunctionCall();
-			else if (next->type == TokenType::Dot)
-				return ParseMemberAccessExpression();
 
 			return ParseVariableExpression();
 		}
@@ -561,7 +565,7 @@ static unique_ptr<Expression> ParseFunctionDefinition(Token* nameToken)
 	return function;
 }
 
-static unique_ptr<Expression> ParseVariableExpression()
+static unique_ptr<Load> ParseVariableExpression()
 {
 	PROFILE_FUNCTION();
 
@@ -569,28 +573,13 @@ static unique_ptr<Expression> ParseVariableExpression()
 
 	Token* current = &parser->current;
 
-	if (parser->lexer->nextToken.type == TokenType::Dot)
-	{
-		auto member = make_unique<MemberRead>();
+	auto variable = make_unique<Load>();
+	variable->name = std::string(current->start, current->length);
+	variable->type = GetVariableType(variable->name);
 
-		// Accessing a structure member
-		Advance(); // To .
-		Advance(); // Through .
+	Advance(); // Through identifier
 
-		member->memberName = std::string(current->start, current->length);
-
-		return member;
-	}
-	else
-	{
-		auto variable = make_unique<VariableRead>();
-		variable->name = std::string(current->start, current->length);
-		variable->type = GetVariableType(variable->name);
-
-		Advance(); // Through identifier
-
-		return variable;
-	}
+	return variable;
 }
 
 static unique_ptr<Statement> ParseVariableDefinitionStatement()
@@ -668,16 +657,11 @@ static unique_ptr<Statement> ParseVariableDefinitionStatement()
 
 		ResetState();
 	}
-	else
-	{
-		Advance(); // Through ;
-		return variable;
-	}
 
 	return variable;
 }
 
-static unique_ptr<Expression> ParseMemberAccessExpression()
+static unique_ptr<Store> ParseVariableStatement(bool consumeSemicolon)
 {
 	PROFILE_FUNCTION();
 
@@ -686,65 +670,6 @@ static unique_ptr<Expression> ParseMemberAccessExpression()
 	std::string variableName = std::string(current->start, current->length);
 
 	Type* type = GetVariableType(variableName);
-
-	Advance(); // Through variable name
-	Advance(); // Through .
-
-	std::string memberName = std::string(current->start, current->length);
-
-	auto expr = make_unique<MemberRead>();
-
-	expr->variableTypename = type->name;
-	expr->variableName = variableName;
-	expr->memberName = memberName;
-	expr->type = type;
-
-	Advance(); // Through identifier
-
-	return expr;
-}
-
-static unique_ptr<Statement> ParseMemberWriteStatement(const std::string& variableName, Type* type)
-{
-	Token* current = &parser->current;
-
-	Advance(); // To .
-	Advance(); // Through .
-
-	std::string memberName = std::string(current->start, current->length);
-
-	Advance(); // Through id
-
-	// Advance through the = if there is one
-	if (current->type == TokenType::Equal)
-		Advance();
-
-	auto statement = make_unique<MemberWrite>();
-
-	statement->variableTypename = type->name;
-	statement->variableName = variableName;
-	statement->memberName = memberName;
-
-	statement->right = ParseExpression(-1);
-	statement->type = type;
-
-	Expect(TokenType::Semicolon, "expected ';' after statement");
-
-	return statement;
-}
-
-static unique_ptr<Statement> ParseVariableStatement()
-{
-	PROFILE_FUNCTION();
-
-	Token* current = &parser->current;
-
-	std::string variableName = std::string(current->start, current->length);
-
-	Type* type = GetVariableType(variableName);
-
-	if (parser->lexer->nextToken.type == TokenType::Dot)
-		return ParseMemberWriteStatement(variableName, type);
 
 	Advance(); // Through identifier
 
@@ -754,7 +679,7 @@ static unique_ptr<Statement> ParseVariableStatement()
 	auto previousState = parser->state;
 	OrState(ParseState::VariableWrite);
 
-	auto variable = make_unique<VariableWrite>();
+	auto variable = make_unique<Store>();
 	variable->name = variableName;
 	variable->type = type;
 
@@ -773,7 +698,7 @@ static unique_ptr<Statement> ParseVariableStatement()
 		case BinaryType::CompoundDiv: binary->binaryType = BinaryType::CompoundDiv; break;
 		}
 
-		auto left = make_unique<VariableRead>();
+		auto left = make_unique<Load>();
 		left->name = variableName;
 		left->type = type;
 
@@ -784,7 +709,8 @@ static unique_ptr<Statement> ParseVariableStatement()
 		
 		parser->state = previousState;
 
-		Expect(TokenType::Semicolon, "expected ';' after statement");
+		if (consumeSemicolon)
+			Expect(TokenType::Semicolon, "expected ';' after statement");
 
 		variable->right = std::move(binary);
 
@@ -795,14 +721,15 @@ static unique_ptr<Statement> ParseVariableStatement()
 		variable->right = ParseExpression(-1);
 
 		parser->state = previousState;
-
-		Expect(TokenType::Semicolon, "expected ';' after statement");
+		
+		if (consumeSemicolon)
+			Expect(TokenType::Semicolon, "expected ';' after statement");
 
 		return variable;
 	}
 }
 
-static unique_ptr<Statement> ParseBranchStatement()
+static unique_ptr<Branch> ParseBranchStatement()
 {
 	PROFILE_FUNCTION();
 
@@ -848,39 +775,6 @@ static unique_ptr<Statement> ParseBranchStatement()
 	return statement;
 }
 
-static unique_ptr<Statement> ParseStructureDefinition(Token* nameToken)
-{
-	PROFILE_FUNCTION();
-
-	// We start at the struct keyword
-
-	auto structure = make_unique<StructureDefinition>();
-	structure->name = std::string(nameToken->start, nameToken->length);
-	auto type = GetType<UserDefinedType>(structure->name);
-
-	Advance(); // Through ::
-	Advance(); // Through 'struct'
-	Expect(TokenType::LeftCurlyBracket, "expected '{' after 'struct'");
-
-	Token* current = &parser->current;
-	
-	DeepenScope();
-	
-	// Parse all the declarations in the body
-	while (current->type != TokenType::RightCurlyBracket)
-	{
-		auto decl = ParseVariableDefinitionStatement();
-		type->members.push_back({ decl->name, decl->type });
-		structure->members.push_back(std::move(decl));
-	}
-
-	IncreaseScope();
-
-	Expect(TokenType::RightCurlyBracket, "expected '}' ater struct body");
-
-	return structure;
-}
-
 static unique_ptr<Statement> ParseStatement()
 {
 	PROFILE_FUNCTION();
@@ -911,8 +805,6 @@ static unique_ptr<Statement> ParseStatement()
 			{
 			case TokenType::LeftParen:
 				return ParseFunctionDefinition(&identifier);
-			case TokenType::Struct:
-				return ParseStructureDefinition(&identifier);
 			default:
 				throw CompileError("invalid declaration");
 			}
@@ -920,7 +812,7 @@ static unique_ptr<Statement> ParseStatement()
 		case TokenType::LeftParen:
 			return ParseFunctionCall();
 		default:
-			return ParseVariableStatement(); // If all else 'fails', it's a variable statement
+			return ParseVariableStatement(true); // If all else 'fails', it's a variable statement
 		}
 
 		throw LimeError("invalid identifier expression '%.*s'", next->length, next->start);

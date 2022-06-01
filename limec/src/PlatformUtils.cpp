@@ -6,6 +6,8 @@
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
 
+static HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+
 inline void Win32LaunchProcess(LPWSTR argv)
 {
 	PROFILE_FUNCTION();
@@ -52,4 +54,14 @@ void LaunchProcess(const char* args)
 
 	delete[] wArg;
 #endif
+}
+
+void SetConsoleColor(int c)
+{
+	SetConsoleTextAttribute(hConsole, c);
+}
+
+void ResetConsoleColor()
+{
+	SetConsoleTextAttribute(hConsole, 15);
 }

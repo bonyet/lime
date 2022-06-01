@@ -17,6 +17,7 @@ static bool IsWhitespace(char c)
 static void Advance(int length)
 {
 	lexer->current += length;
+	lexer->column += length;
 }
 
 static char Peek()
@@ -57,7 +58,10 @@ static void SkipWhitespace()
 	while (IsWhitespace(*lexer->current))
 	{
 		if (*lexer->current == '\n')
+		{
 			lexer->line++;
+			lexer->column = 0;
+		}
 
 		Advance(1);
 	}
@@ -117,6 +121,7 @@ static Token StringToken()
 		char c = Peek();
 		if (c == '\n' || c == '\0')
 		{
+			Advance(-1);
 			throw LimeError("unterminated string");
 		}
 
@@ -271,7 +276,14 @@ static void ProcessToken(Token* token)
 		}
 	}
 	case ';':  *token = MakeToken(TokenType::Semicolon, 1); return;
-	case '.':  *token = MakeToken(TokenType::Dot, 1); return;
+	case '.':  
+	{
+		if (lexer->current[1] == '.' && lexer->current[2] == '.')
+			*token = MakeToken(TokenType::Ellipse, 3);
+		else
+			*token = MakeToken(TokenType::Dot, 1); 
+		return;
+	}
 	case ',':  *token = MakeToken(TokenType::Comma, 1); return;
 	case '?':  *token = MakeToken(TokenType::QuestionMark, 1); return;
 
@@ -330,6 +342,20 @@ static void ProcessToken(Token* token)
 		if (CheckKeyword("if", 2))
 		{
 			*token = MakeToken(TokenType::If, 2);
+			return;
+		}
+		if (CheckKeyword("import", 6))
+		{
+			*token = MakeToken(TokenType::Import, 6);
+			return;
+		}
+		break;
+	}
+	case 'n':
+	{
+		if (CheckKeyword("null", 4))
+		{
+			*token = MakeToken(TokenType::Null, 4);
 			return;
 		}
 		break;
@@ -391,9 +417,11 @@ static void ProcessToken(Token* token)
 		return;
 	}
 
-	// Unknown token type
+	// Unknown token
 	Advance(1);
-	throw LimeError("unexpected token '%1s'", lexer->start);
+
+	throw LimeError("unexpected token '%.*s'", 6, lexer->start);
+	// TODO: "    ^ here"
 }
 
 Token Lexer::Next()
@@ -414,15 +442,20 @@ Token Lexer::Next()
 	// so instead I use this little hack to revert current to what it was before
 	const char* oldCurrent = current;
 	int oldLine = line;
+	int oldColumn = column;
 	start = current;
 	
 	SkipWhitespace();
 
-	ProcessToken(&nextToken);
+	try
+	{
+		ProcessToken(&nextToken);
+	} catch (LimeError&) {}
 
 	current = oldCurrent;
 	start = oldStart;
 	line = oldLine;
+	column = oldColumn;
 
 	return currentToken;
 }

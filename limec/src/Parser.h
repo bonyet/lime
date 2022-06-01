@@ -4,7 +4,7 @@
 
 struct ParseResult
 {
-	bool Succeeded = true;
+	bool Succeeded = false;
 	std::unique_ptr<Compound> module;
 };
 
@@ -33,10 +33,9 @@ struct Parser
 {
 	ParseResult Parse(Lexer* lexer);
 
-	uint32_t scopeDepth = 0;
-
-	ParseState state = ParseState::Default;
 	Token current;
-	Lexer* lexer = nullptr;
 	struct Scope* scope;
+	Lexer* lexer = nullptr;
+	uint32_t scopeDepth = 0;
+	ParseState state = ParseState::Default;
 };

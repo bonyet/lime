@@ -33,6 +33,8 @@ static std::string ReadFile(const char* filepath)
 	return fileContents;
 }
 
+#define COMPILATION_OUTPUT 0
+
 int main(int argc, const char* argv[])
 {
 	PROFILE_BEGIN_SESSION("Profile", "ProfileResult.json");
@@ -67,16 +69,20 @@ int main(int argc, const char* argv[])
 
 		Emitter emitter;
 		emitter.Emit(result.ir, "result.ll");
-	
-	//#ifdef _WIN32
-	//	LaunchProcess("\"llvm-as\" result.ll");
-	//	// Generate obj file
-	//	LaunchProcess("\"llc\" result.bc");
-	//	// Link
-	//	//LaunchProcess("\"link\" result.o -defaultlib:libcmt");
-	//#else
-	//	#error "Sorry bro"
-	//#endif
+
+		LaunchProcess("lli result.ll");
+
+#if COMPILATION_OUTPUT
+	#ifdef _WIN32
+		LaunchProcess("\"llvm-as\" result.ll");
+		// Generate obj file
+		LaunchProcess("\"llc\" result.bc");
+		// Link
+		//LaunchProcess("\"link\" result.o -defaultlib:libcmt");
+	#else
+		#error "Platform not supported"
+	#endif
+#endif
 	}
 
 	PROFILE_END_SESSION();

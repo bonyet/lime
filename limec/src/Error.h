@@ -4,14 +4,18 @@
 struct LimeError : std::exception
 {
 	int GetLine();
+	int GetColumn();
 
 	template<typename... Args>
 	LimeError(const char* format, Args&&... args)
+		: line(GetLine()), column(GetColumn())
 	{
-		const auto formatLine = FormatString("[Line %d]: ", GetLine());
-		message = formatLine + FormatString(format, std::forward<Args>(args)...);
+		message = FormatString(format, std::forward<Args>(args)...);
+
+		column = GetColumn();
 	}
 
+	int line = 0, column = 0;
 	std::string message;
 };
 
@@ -19,10 +23,11 @@ struct LimeError : std::exception
 struct CompileError : std::exception
 {
 	template<typename... Args>
-	CompileError(const char* format, Args&&... args)
-		: message(FormatString(format, std::forward<Args>(args)...))
+	CompileError(int line, const char* format, Args&&... args)
+		: line(line), message(FormatString(format, std::forward<Args>(args)...))
 	{
 	}
 
+	int line = 0;
 	std::string message;
 };

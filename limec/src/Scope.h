@@ -3,7 +3,6 @@
 struct ScopedValue
 {
 	Type* type;
-	VariableFlags flags;
 };
 
 struct Scope

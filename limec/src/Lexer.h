@@ -24,10 +24,12 @@ enum class TokenType : char
 	True, False,
 	Return, Const,
 	Struct, Class,
+	Null, 
+	Import,
 
 	// Misc
 	Ampersand, Pipe, Percent, At, Hashtag, ID, 
-	RightArrow,
+	RightArrow, Ellipse,
 	// Literals
 	String, Number,
 };
@@ -50,7 +52,7 @@ struct Lexer
 	// Used for peeking
 	Token previousToken, currentToken, nextToken;
 
-	int line = 1;
+	int line = 1, column = 0;
 	const char* current; // Current character
 	const char* start; // First character of token being lexed
 };

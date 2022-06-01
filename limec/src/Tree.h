@@ -6,21 +6,22 @@
 enum class StatementType
 {
 	Default = 1,
-	Compound,
-	PrimaryValue, PrimaryString, 
+	Compound, Import,
+	PrimaryValue, StringValue, 
 	UnaryExpr, BinaryExpr,
 	Branch,
 	CallExpr,
 	ReturnExpr,
-	FunctionDefine,
+	FunctionDefine, FunctionPrototypeDefine,
 	VariableDefine,
 	StructureDefine,
-	MemberReadExpr, VariableReadExpr,
-	MemberWriteExpr, VariableWriteExpr,
+	MemberLoadExpr, LoadExpr,
+	MemberStoreExpr, StoreExpr,
 };
 
 struct Statement
 {
+	int line = 0;
 	StatementType statementType = (StatementType)0;
 
 	virtual ~Statement() {}
@@ -41,7 +42,7 @@ struct Compound : public Statement
 
 struct Expression : public Statement
 {
-	Type* type;
+	Type* type = nullptr;
 };
 
 struct Primary : public Expression
@@ -54,7 +55,8 @@ struct PrimaryValue : public Primary
 {
 	union
 	{
-		int i32 = 0;
+		int64_t i64 = 0;
+		int64_t* ip64;
 		bool b32;
 		float f32;
 	} value;
@@ -67,14 +69,16 @@ struct PrimaryValue : public Primary
 	llvm::Value* Generate() override;
 };
 
-struct PrimaryString : public Primary
+struct StringValue : public Primary
 {
 	std::string value;
 
-	PrimaryString()
+	StringValue()
 	{
-		statementType = StatementType::PrimaryString;
+		statementType = StatementType::StringValue;
 	}
+	
+	llvm::Value* Generate() override;
 };
 
 enum class UnaryType
@@ -149,6 +153,7 @@ struct Call : public Expression
 {
 	std::string fnName;
 	std::vector<std::unique_ptr<Expression>> args;
+	struct FunctionPrototype* target = nullptr;
 
 	Call()
 	{
@@ -170,27 +175,28 @@ struct Return : public Expression
 	llvm::Value* Generate() override;
 };
 
-enum VariableFlags
+struct FunctionPrototype
 {
-	VariableFlags_None = 0 << 0,
-	VariableFlags_Immutable = 1 << 0,
-	VariableFlags_Global = 1 << 1,
+	struct Parameter
+	{
+		std::string name;
+		Type* type = nullptr;
+		bool variadic = false;
+	};
+
+	std::string name;
+	std::vector<Parameter> params;
+	Type* returnType = nullptr;
+	int scopeIndex = -1;
 };
 
 // Yes, function definitions don't technically express anything, but this just inherits from Expression anyways
 struct FunctionDefinition : public Expression
 {
-	struct Parameter
-	{
-		Type* type;
-		std::string name;
-		VariableFlags flags = VariableFlags_None;
-	};
-
-	std::string name;
-	std::vector<Parameter> params;
+	FunctionPrototype prototype;
 	std::vector<std::unique_ptr<Statement>> body;
-	int scopeIndex = -1; // index into parser's scope container
+
+	bool HasBody() const { return body.size(); }
 
 	FunctionDefinition()
 	{
@@ -200,22 +206,30 @@ struct FunctionDefinition : public Expression
 	llvm::Value* Generate() override;
 };
 
-inline VariableFlags operator|(VariableFlags a, VariableFlags b)
+struct Import : public Statement
 {
-	return (VariableFlags)((int)a | (int)b);
-}
-inline VariableFlags operator|=(VariableFlags& a, VariableFlags b)
-{
-	return (a = (VariableFlags)((int)a | (int)b));
-}
+	std::unique_ptr<Expression> data;
+
+	Import()
+	{
+		statementType = StatementType::Import;
+	}
+
+	llvm::Value* Generate() override;
+};
 
 struct VariableDefinition : public Statement
 {
 	std::unique_ptr<Expression> initializer;
-	VariableFlags flags = VariableFlags_None;
 	Type* type = nullptr;
 	std::string name;
 	int scope = -1;
+
+	// Additional modifiers
+	struct Modifiers
+	{
+		bool isGlobal = false, isConst = false;
+	} modifiers;
 
 	VariableDefinition()
 	{
@@ -241,10 +255,11 @@ struct StructureDefinition : public Statement
 struct Load : public Expression
 {
 	std::string name;
+	bool emitInstruction = true; // Whether or not an actual load instruction should be emitted;
 
 	Load()
 	{
-		statementType = StatementType::VariableReadExpr;
+		statementType = StatementType::LoadExpr;
 	}
 
 	llvm::Value* Generate() override;
@@ -258,7 +273,7 @@ struct Store : public Expression
 
 	Store()
 	{
-		statementType = StatementType::VariableWriteExpr;
+		statementType = StatementType::StoreExpr;
 	}
 
 	llvm::Value* Generate() override;

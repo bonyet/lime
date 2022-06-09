@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Parser.h"
+#include "CmdLine/CommandLineArguments.h"
 
 struct CompileResult
 {
@@ -13,5 +14,5 @@ class Generator
 public:
 	Generator();
 
-	CompileResult Generate(ParseResult& parseResult);
+	CompileResult Generate(ParseResult& parseResult, const CommandLineArguments& compilerArgs);
 };

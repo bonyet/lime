@@ -55,14 +55,14 @@ private:
 	friend struct UserDefinedType;
 };
 
-//struct UserDefinedType : public Type
-//{
-//public:
-//	std::vector<std::pair<std::string, Type*>> members;
-//
-//	UserDefinedType() = default;
-//	UserDefinedType(const std::string& name)
-//		: Type(name) {}
-//
-//	bool isPrimitive() const override { return false; }
-//};
+struct UserDefinedType : public Type
+{
+public:
+	std::vector<std::pair<std::string, Type*>> members;
+
+	UserDefinedType() = default;
+	UserDefinedType(const std::string& name)
+		: Type(name) {}
+
+	bool isPrimitive() const override { return false; }
+};

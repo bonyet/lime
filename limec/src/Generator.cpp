@@ -4,6 +4,12 @@
 #include "Generator.h"
 #include "Casts.h"
 
+#include "llvm/Passes/PassBuilder.h"
+#include "llvm/Transforms/InstCombine/InstCombine.h"
+#include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Scalar/GVN.h"
+#include "llvm/Transforms/Utils.h"
+
 #include "PlatformUtils.h"
 
 static std::unique_ptr<llvm::LLVMContext> context;
@@ -198,9 +204,9 @@ llvm::Value* Store::Generate()
 		value = castAttempt;
 	}
 
-	Assert(!IsPointer(namedValue.type), line,
-		"operands for an assignment must be of the same type. got: %s = %s",
-		type->name.c_str(), right->type->name.c_str());
+	//Assert(!IsPointer(namedValue.type), line,
+	//	"operands for an assignment must be of the same type. got: %s = %s",
+	//	type->name.c_str(), right->type->name.c_str());
 
 	if (storeIntoLoad)
 	{
@@ -544,7 +550,8 @@ llvm::Value* Call::Generate()
 	}
 	else
 	{
-		Assert(args.size() == func->arg_size(), line, "incorrect number of arguments passed to '%s'", fnName.c_str());
+		int given = args.size(), required = func->arg_size();
+		Assert(given == required, line, given > required ? "too many arguments passed to '%s'" : "not enough arguments passed to '%s'", fnName.c_str());
 	}
 
 	// Generate arguments
@@ -580,6 +587,7 @@ llvm::Value* Call::Generate()
 	return callInst;
 }
 
+static const std::string ARG_PREFIX = "arg_";
 static void GenerateEntryBlockAllocasAndLoads(llvm::Function* function)
 {
 	using namespace llvm;
@@ -591,7 +599,7 @@ static void GenerateEntryBlockAllocasAndLoads(llvm::Function* function)
 		llvm::Type* type = arg->getType();
 
 		std::string name = arg->getName().str();
-		name.pop_back(); // Remove arg suffix
+		name.erase(0, ARG_PREFIX.length()); // Remove arg suffix
 
 		AllocaInst* allocaInst = builder->CreateAlloca(type, nullptr, name);
 		builder->CreateStore(arg, allocaInst); // Store argument value into allocated value
@@ -605,17 +613,26 @@ llvm::Value* Return::Generate()
 	PROFILE_FUNCTION();
 
 	// Handle the return value
-	llvm::Value* returnValue = expression->Generate();
-	llvm::Value* result = returnValue;
-	if (returnValue->getType() != currentFunction->getReturnType())
+	if (expression)
 	{
-		result = Cast::TryIfValid(returnValue->getType(), currentFunction->getReturnType(), returnValue);
-		if (result)
-			Warn(line, "return statement for function '%s': implicit cast to return type from '%s'", currentFunction->getName().data(), expression->type->name.c_str());
-		Assert(result, line, "invalid return value for function '%s': illegal implicit cast to return type from '%s'", currentFunction->getName().data(), expression->type->name.c_str());
+		llvm::Value* returnValue = expression->Generate();
+		llvm::Value* result = returnValue;
+		if (returnValue->getType() != currentFunction->getReturnType())
+		{
+			result = Cast::TryIfValid(returnValue->getType(), currentFunction->getReturnType(), returnValue);
+			if (result)
+				Warn(line, "return statement for function '%s': implicit cast to return type from '%s'", currentFunction->getName().data(), expression->type->name.c_str());
+			Assert(result, line, "invalid return value for function '%s': illegal implicit cast to return type from '%s'", currentFunction->getName().data(), expression->type->name.c_str());
+		}
+
+		return builder->CreateRet(result);
 	}
-	
-	return builder->CreateRet(result);
+	else
+	{
+		// No return value
+		Assert(currentFunction->getReturnType() == llvm::Type::getVoidTy(*context), line, "invalid return statement in function '%s': expected a return value", currentFunction->getName());
+		return builder->CreateRetVoid();
+	}
 }
 
 llvm::Value* Import::Generate()
@@ -652,10 +669,6 @@ static llvm::Value* GenerateFunctionPrototype(const FunctionDefinition* definiti
 	llvm::FunctionType* functionType = llvm::FunctionType::get(returnType, paramTypes, hasVarArg);
 	llvm::Function* function = llvm::Function::Create(functionType, llvm::Function::ExternalLinkage, prototype.name.c_str(), *module);
 
-	// Set names for args
-	for (auto& arg : function->args())
-		arg.setName(std::to_string(index++));
-
 	return function;
 }
 
@@ -687,7 +700,7 @@ llvm::Value* FunctionDefinition::Generate()
 
 		// Set names for function args
 		for (auto& arg : function->args())
-			arg.setName(prototype.params[index++].name + '_'); // Suffix arguments with '_' to make stuff work
+			arg.setName(ARG_PREFIX + prototype.params[index++].name); // Suffix arguments with '_' to make stuff work
 	}
 
 	Assert(function->empty(), line, "function cannot be redefined");
@@ -736,8 +749,6 @@ llvm::Value* StructureDefinition::Generate()
 {
 	PROFILE_FUNCTION();
 	
-	Assert(members.size(), line, "structs must own at least one member");
-
 	// The heavy lifting was done in ResolveType(), so we don't really do anything here
 
 	return nullptr;
@@ -794,9 +805,57 @@ static void ResolveParsedTypes(ParseResult& result)
 	}
 
 	// Resolve non primitive types here
+	for (Type* baseType : Typer::GetAll())
+	{
+		if (baseType->isPrimitive())
+			continue;
+
+		UserDefinedType* type = static_cast<UserDefinedType*>(baseType);
+
+		std::vector<llvm::Type*> members;
+		for (auto& member : type->members)
+			members.push_back(member.second->raw);
+
+		type->raw = llvm::StructType::create(*context, members, type->name);
+	}
 }
 
-CompileResult Generator::Generate(ParseResult& parseResult)
+static llvm::PassBuilder::OptimizationLevel GetLLVMOptimizationLevel(const CommandLineArguments& compilerArgs)
+{
+	switch (compilerArgs.optimizationLevel)
+	{
+		case 0: return llvm::PassBuilder::OptimizationLevel::O0;
+		case 1: return llvm::PassBuilder::OptimizationLevel::O1;
+		case 2: return llvm::PassBuilder::OptimizationLevel::O2;
+		case 3: return llvm::PassBuilder::OptimizationLevel::O3;
+	}
+}
+
+static void DoOptimizationPasses(const CommandLineArguments& compilerArgs)
+{
+	using namespace llvm;
+
+	LoopAnalysisManager loopAnalysisManager;
+	FunctionAnalysisManager functionAnalysisManager;
+	CGSCCAnalysisManager cgsccAnalysisManager;
+	ModuleAnalysisManager moduleAnalysisManager;
+
+	PassBuilder passBuilder;
+
+	// Register all the basic analyses with the managers
+	passBuilder.registerModuleAnalyses(moduleAnalysisManager);
+	passBuilder.registerCGSCCAnalyses(cgsccAnalysisManager);
+	passBuilder.registerFunctionAnalyses(functionAnalysisManager);
+	passBuilder.registerLoopAnalyses(loopAnalysisManager);
+	passBuilder.crossRegisterProxies(loopAnalysisManager, functionAnalysisManager, cgsccAnalysisManager, moduleAnalysisManager);
+
+	ModulePassManager modulePassManager = passBuilder.buildPerModuleDefaultPipeline(GetLLVMOptimizationLevel(compilerArgs));
+
+	// Hells ya
+	modulePassManager.run(*module, moduleAnalysisManager);
+}
+
+CompileResult Generator::Generate(ParseResult& parseResult, const CommandLineArguments& compilerArgs)
 {
 	PROFILE_FUNCTION();
 	
@@ -812,8 +871,17 @@ CompileResult Generator::Generate(ParseResult& parseResult)
 			child->Generate();
 		}
 
+		// Optimizations
+		if (compilerArgs.optimizationLevel > 0)
+		{
+			// optimization level 9000%
+			DoOptimizationPasses(compilerArgs);
+		}
+
+		// Collect IR to string
 		llvm::raw_string_ostream stream(result.ir);
 		module->print(stream, nullptr);
+
 		result.Succeeded = true;
 	}
 	catch (const CompileError& err)

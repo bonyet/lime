@@ -22,6 +22,9 @@ static std::vector<Scope> scopes = { { } };
 static std::vector<Call*> functionCallExpressions = {}; // Ugly but necessary
 static std::unordered_map<std::string, FunctionPrototype*> declaredFunctions = {};
 
+// Set to false in certain circumstances
+static bool currentlyAllowSyncAtSemicolon = true;
+
 static Token Advance() 
 {
 	return (parser->current = parser->lexer->Next());
@@ -100,7 +103,7 @@ static Type* GetVariableType(const std::string& name)
 		type = parser->scope->namedVariableTypes[name].type;
 
 	if (!type)
-		throw LimeError("undefined variable");
+		throw LimeError("undefined variable '%s'", name.c_str());
 
 	return type;
 }
@@ -195,6 +198,7 @@ static unique_ptr<Expression> ParseUnaryExpression();
 static unique_ptr<Statement>  ParseCompoundStatement();
 static unique_ptr<Expression> ParsePrimaryExpression();
 static unique_ptr<Load>       ParseVariableExpression();
+static unique_ptr<Statement>  ParseVariableDefinitionStatement();
 static unique_ptr<Store>      ParseVariableStatement(bool consumeSemicolon);
 
 static unique_ptr<Expression> ParseExpression(int priority) 
@@ -353,7 +357,7 @@ static unique_ptr<Expression> ParseUnaryExpression()
 			unary->unaryType = UnaryType::Deref;
 
 			Advance(); // To operand			
-			auto operand = ParsePrimaryExpression();
+			auto operand = ParseExpression(20);
 			bool emitLoad = true;
 
 			if (operand->statementType == StatementType::LoadExpr && 
@@ -425,7 +429,9 @@ static unique_ptr<Expression> ParseReturnStatement()
 
 	auto returnExpr = make_unique<Return>();
 	returnExpr->line = parser->lexer->line;
-	returnExpr->expression = ParseExpression(-1);
+
+	if (parser->current.type != TokenType::Semicolon)
+		returnExpr->expression = ParseExpression(-1);
 
 	return returnExpr;
 }
@@ -577,6 +583,43 @@ static unique_ptr<Statement> ParseExpressionStatement()
 	return statement;
 }
 
+static unique_ptr<Statement> ParseStructureDefinition(Token* nameToken)
+{
+	Token* current = &parser->current; // ::
+
+	auto structure = make_unique<StructureDefinition>();
+	structure->line = parser->lexer->line;
+	structure->name = std::string(nameToken->start, nameToken->length);
+
+	Advance(); // To struct
+	Advance(); // Through struct
+
+	Expect(TokenType::LeftCurlyBracket, "expected '{' after 'struct'");
+
+	UserDefinedType* structType = Typer::Add<UserDefinedType>(structure->name);
+
+	while (current->type != TokenType::RightCurlyBracket)
+	{
+		// Parse member variable or function
+		unique_ptr<Statement> member = ParseVariableDefinitionStatement();
+		VariableDefinition* variable = static_cast<VariableDefinition*>(member.get());
+
+		if (member->statementType != StatementType::FunctionDefine &&
+			member->statementType != StatementType::VariableDefine)
+		{
+			// Tf is the member then
+			throw LimeError("expected a variable or function definition as a member");
+		}
+
+		structType->members.push_back({ variable->name, variable->type });
+		structure->members.push_back(std::move(member));
+	}
+
+	Expect(TokenType::RightCurlyBracket, "expected '}' after struct definition");
+
+	return structure;
+}
+
 static unique_ptr<Expression> ParseFunctionDefinition(Token* nameToken)
 {
 	PROFILE_FUNCTION();
@@ -635,7 +678,16 @@ static unique_ptr<Expression> ParseFunctionDefinition(Token* nameToken)
 	{
 		Advance(); // Through ->
 
-		function->prototype.returnType = GetType(std::string(current->start, current->length));
+		if (current->type == TokenType::Star)
+		{
+			// Pointer
+			Advance(); // Through *
+			function->prototype.returnType = GetType("*" + std::string(current->start, current->length));
+		}
+		else
+		{
+			function->prototype.returnType = GetType(std::string(current->start, current->length));
+		}
 		
 		Advance(); // Through type
 	}
@@ -656,6 +708,7 @@ static unique_ptr<Expression> ParseFunctionDefinition(Token* nameToken)
 	}
 
 	IncreaseScope();
+	parser->scope->isFunctionScope = true;
 
 	Expect(TokenType::RightCurlyBracket, "expected '}' after function body");
 	
@@ -668,8 +721,6 @@ static unique_ptr<Expression> ParseFunctionDefinition(Token* nameToken)
 static unique_ptr<Load> ParseVariableExpression()
 {
 	PROFILE_FUNCTION();
-
-	// TODO: revisit structure implementation
 
 	Token* current = &parser->current;
 
@@ -756,11 +807,11 @@ static unique_ptr<Statement> ParseVariableDefinitionStatement()
 	}
 	else
 	{
-		if (!variable->type && !variable->initializer) // Only if we didn't use :=
+		if (!variable->initializer) // Only if we didn't use :=
 			Expect(TokenType::Semicolon, "expected ';' after variable declaration");
 	}
 
-	return variable;
+	return std::move(variable);
 }
 
 static unique_ptr<FunctionDefinition> ParseFunctionPrototypeDefinition()
@@ -960,6 +1011,7 @@ static unique_ptr<Branch> ParseBranchStatement()
 			// Single statement in body
 			branch->elseBody.push_back(ParseStatement());
 		}
+
 		IncreaseScope();
 	}
 
@@ -1001,6 +1053,8 @@ static unique_ptr<Statement> ParseStatement()
 			{
 			case TokenType::LeftParen:
 				return ParseFunctionDefinition(&identifier);
+			case TokenType::Struct:
+				return ParseStructureDefinition(&identifier);
 			default:
 				throw LimeError("invalid declaration");
 			}

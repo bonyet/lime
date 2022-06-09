@@ -15,8 +15,8 @@ enum class StatementType
 	FunctionDefine, FunctionPrototypeDefine,
 	VariableDefine,
 	StructureDefine,
-	MemberLoadExpr, LoadExpr,
-	MemberStoreExpr, StoreExpr,
+	LoadExpr,
+	StoreExpr,
 };
 
 struct Statement
@@ -220,7 +220,7 @@ struct Import : public Statement
 
 struct VariableDefinition : public Statement
 {
-	std::unique_ptr<Expression> initializer;
+	std::unique_ptr<Expression> initializer = nullptr;
 	Type* type = nullptr;
 	std::string name;
 	int scope = -1;
@@ -242,7 +242,7 @@ struct VariableDefinition : public Statement
 struct StructureDefinition : public Statement
 {
 	std::string name;
-	std::vector<std::unique_ptr<VariableDefinition>> members;
+	std::vector<std::unique_ptr<Statement>> members;
 
 	StructureDefinition()
 	{
@@ -255,7 +255,7 @@ struct StructureDefinition : public Statement
 struct Load : public Expression
 {
 	std::string name;
-	bool emitInstruction = true; // Whether or not an actual load instruction should be emitted;
+	bool emitInstruction = true; // Whether or not an actual load instruction should be emitted
 
 	Load()
 	{
